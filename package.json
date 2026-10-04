@@ -1,0 +1,14 @@
+{
+  "name": "airlan",
+  "version": "0.1.0",
+  "description": "Local control for Mitsubishi Heavy Industries air conditioners with the WF-RAC Wi-Fi module. No cloud.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Anne Erdtsieck-Wijnen",
+  "repository": "github:erdtsieck/airlan",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

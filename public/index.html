@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AirLAN</title>
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AirLAN">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5ea;
+    --cool: #1d7fe0; --heat: #e8641b; --off: #9aa1ad; --danger: #c62828;
+    --accent: var(--off);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #191c22; --text: #eef0f3; --muted: #9098a5; --line: #2a2e36;
+            --cool: #4ea3ff; --heat: #ff8a3d; --off: #5d6470; --danger: #ff6b6b; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { max-width: 440px; margin: 0 auto; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+
+  .units { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px; scrollbar-width: none; }
+  .units button { flex: 0 0 auto; padding: 8px 14px; border-radius: 999px; background: var(--card);
+    border: 1px solid var(--line); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .units button[aria-selected="true"] { border-color: var(--text); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
+  .dot.cool { background: var(--cool); } .dot.heat { background: var(--heat); }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 20px; margin-bottom: 12px; }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .name { font-size: 22px; font-weight: 650; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rename { color: var(--muted); padding: 4px; }
+  .climate { color: var(--muted); font-size: 14px; margin-top: 2px; }
+
+  .power { width: 56px; height: 56px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center;
+    background: var(--line); color: var(--muted); transition: background .2s, color .2s; }
+  .power.on { background: var(--accent); color: #fff; }
+  .power svg { width: 26px; height: 26px; }
+
+  .temp { display: flex; align-items: center; justify-content: space-between; margin: 28px 0 8px; }
+  .temp button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--line); font-size: 30px; line-height: 1; }
+  .temp button:active:not(:disabled) { background: var(--line); }
+  .setpoint { text-align: center; font-variant-numeric: tabular-nums; }
+  .setpoint b { font-size: 64px; font-weight: 300; letter-spacing: -2px; color: var(--accent); transition: color .2s; }
+  .setpoint small { display: block; color: var(--muted); font-size: 13px; margin-top: -6px; }
+
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 20px; }
+  .modes button { padding: 14px; border-radius: 14px; border: 1px solid var(--line); display: flex;
+    align-items: center; justify-content: center; gap: 8px; font-weight: 550; }
+  .modes button svg { width: 20px; height: 20px; }
+  .modes button[aria-pressed="true"][data-mode="cool"] { background: var(--cool); border-color: var(--cool); color: #fff; }
+  .modes button[aria-pressed="true"][data-mode="heat"] { background: var(--heat); border-color: var(--heat); color: #fff; }
+  .other-mode { text-align: center; color: var(--muted); font-size: 13px; margin-top: 8px; }
+
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .chips button { padding: 10px 0; border-radius: 12px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .chips button:active:not(:disabled) { background: var(--line); }
+  .timer-active { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .timer-active b { font-size: 18px; }
+  .timer-active .left { color: var(--muted); font-size: 14px; }
+  .cancel { padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); }
+  .hint { color: var(--muted); font-size: 14px; margin: 0; }
+
+  .status { min-height: 20px; text-align: center; font-size: 14px; color: var(--muted); }
+  .status.error { color: var(--danger); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  .empty button { margin-top: 12px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <nav class="units" role="tablist" id="units"></nav>
+  <div id="view"></div>
+  <p class="status" id="status" role="status"></p>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

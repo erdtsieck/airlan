@@ -1,0 +1,23 @@
+{
+  "_comment": "getAirconStat frames captured from three real units on 2026-10-04.",
+  "frames": {
+    "e81656c09e49": {
+      "firmType": "WF-RAC",
+      "wirelessFirmVer": "010",
+      "mcuFirmVer": "131",
+      "airconStat": "AAeqiKr/AAAAAAASCgAAAAAAAf////+Am4EECAAqmwAAiAAAAgAAAAAAAAOAIJv/gBCh/5QQAQDNQg=="
+    },
+    "e81656cb0d45": {
+      "firmType": "WF-RAC",
+      "wirelessFirmVer": "010",
+      "mcuFirmVer": "131",
+      "airconStat": "AAeyj6n/AAAAAAAUCgAAAAAAAf////8cK4EEEAcpmwAAiAAABAAAAAAAAAOAIJv/gBCd/5QQAAA/fA=="
+    },
+    "e8165626b22e": {
+      "firmType": "WF-RAC",
+      "wirelessFirmVer": "010",
+      "mcuFirmVer": "131",
+      "airconStat": "AAeqnq7/AAAAAAAQCgAAAAAAAf////+MA4EECBYurAAAiAAAAAAAAAAAAAOAIKz/gBCI/5QQAQAnNQ=="
+    }
+  }
+}

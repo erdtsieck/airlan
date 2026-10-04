@@ -1,0 +1,140 @@
+# AirLAN
+
+Simple, cloud-free control for Mitsubishi Heavy Industries air conditioners with the
+**WF-RAC** Wi-Fi module (the module behind the Smart M-Air app). AirLAN talks to the units
+directly over your home network and serves a small mobile web app.
+
+Per unit you can:
+
+- switch it on or off
+- choose cooling or heating
+- set the temperature (16–30 °C in 0.5° steps)
+- have it switch off automatically after 30 minutes or 1–6 hours
+
+That is all, on purpose. Indoor and outdoor temperature are shown along the way. The app
+follows your browser's language and light/dark theme.
+
+> AirLAN is an independent project. It is not affiliated with, endorsed by or supported by
+> Mitsubishi Heavy Industries. "Works with" means: tested against WF-RAC modules, see below.
+
+## Requirements
+
+- Node.js 20 or newer. No other dependencies.
+- A machine on the same network as the air conditioners that stays on: the switch-off
+  timer runs in the server, so it only fires while the server is running. A Raspberry Pi,
+  NAS or always-on PC works well.
+- The units must already be connected to Wi-Fi (for example with the Smart M-Air app).
+  AirLAN does not do the initial Wi-Fi setup.
+
+## Getting started
+
+```sh
+git clone https://github.com/erdtsieck/airlan.git
+cd airlan
+npm start
+```
+
+On first start AirLAN scans the local network for units. Open
+`http://<ip-of-that-machine>:8321` on your phone and use "Add to Home screen". Give each
+unit a name with the pencil icon.
+
+Set `AIRLAN_PORT` to use another port.
+
+On Windows, `start.ps1 -Install` registers a task that starts the server at logon and
+opens the firewall for the local subnet (it asks for elevation). `start.ps1 -Uninstall`
+removes both. Logs go to `data/server.log`.
+
+## Supported firmware
+
+The WF-RAC module comes in three firmware branches:
+
+| Branch | Transport | Status |
+|---|---|---|
+| `WF-RAC` (e.g. wireless 010, MCU 131) | HTTP | Tested on real units |
+| `WF-RAC-HTTPS` | HTTPS, legacy mbedTLS | Implemented, **not yet tested on real units** |
+| `WCBN4612L` | HTTPS, legacy mbedTLS | Implemented, **not yet tested on real units** |
+
+AirLAN detects the transport per unit. If you have an HTTPS unit, please open an issue
+with your result (the firmware branch and versions are in the `getAirconStat` reply;
+`data/server.log` shows which transport was detected).
+
+## How it works
+
+- `wfrac.js`: the local protocol. `POST <scheme>://<unit>:51443/beaver/command/<command>`
+  with a base64 `airconStat` frame. The encoder and decoder are a port of
+  [pywfrac](https://github.com/blues-sechseck/pywfrac) and are tested byte for byte
+  against it.
+- `server.js`: HTTP server and API. It discovers units, follows them when DHCP gives them
+  a new address, registers itself as an account with each unit and runs the switch-off
+  timers.
+- `public/`: the web app.
+- `data/state.json`: unit names, addresses, timers and AirLAN's own account id. Timers
+  survive a restart; a timer that expired while the server was down fires at startup.
+
+### API
+
+| Request | Effect |
+|---|---|
+| `GET /api/units` | All units with their current state |
+| `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `name` |
+| `PUT /api/units/:id/timer` | Body `{ "minutes": 1–360 }`: switch off after that time |
+| `DELETE /api/units/:id/timer` | Cancel the timer |
+| `POST /api/scan` | Scan the network for units again |
+
+Errors come back as `{ "error": { "code", "message" } }` with `code` one of
+`unreachable`, `unit_refused`, `bad_response`, `invalid`, `not_found`.
+
+## Limitations and quirks
+
+- **Home network only.** The units are reachable on the local network only, and so is
+  AirLAN. Anyone on that network can control the units. That is also true of the module
+  itself, which has no authentication.
+- **Account slot.** Each unit has four account slots. AirLAN uses one.
+- **Write lock.** After a write, the writer holds an exclusive 60-second write lock. If
+  someone just used Smart M-Air or a voice assistant, AirLAN may be refused briefly
+  (`unit_refused`); the timer retries for ten minutes.
+- **One request at a time.** The module accepts one connection at a time and about one
+  request per second. AirLAN queues requests per unit.
+- **No `fetch`.** The module only reads a request body that arrives in the same TCP packet
+  as the headers. Node's `fetch` sends them separately and gets
+  "501 Not supported this command", so AirLAN uses `node:http`.
+
+## Development
+
+```sh
+npm test
+```
+
+The tests use frames captured from real units (`test/fixtures/live-frames.json`) and
+reference vectors generated with pywfrac (`test/fixtures/pywfrac-vectors.json`). To
+regenerate those vectors:
+
+```sh
+pip install pywfrac==0.1.7
+python tools/gen_pywfrac_vectors.py
+```
+
+`test/fixtures/test-unit.key` is a throwaway key for the local HTTPS test server.
+
+## Disclaimer
+
+AirLAN controls heating and cooling equipment through an undocumented protocol. Use it at
+your own risk. The authors accept no liability for damage, energy costs or discomfort.
+
+## Translations
+
+English is the source language. The app's text lives in `public/locales/<language>.json`;
+it picks the first of the browser's preferred languages it has a file for, and falls back
+to English for anything missing. To add a language, copy `en.json` to your language code
+(for example `de.json`) and translate the values. Keep the `{placeholders}` as they are;
+`npm test` checks that every translation has the same keys and placeholders as English.
+
+Available: English, Dutch.
+
+## Contributing
+
+We take Pull Requests! See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE). Contains code derived from pywfrac, see [NOTICE](NOTICE).

@@ -1,0 +1,12 @@
+{
+  "name": "AirLAN",
+  "short_name": "AirLAN",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#1d7fe0",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
