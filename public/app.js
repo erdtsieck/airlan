@@ -25,6 +25,7 @@ const ICONS = {
   power: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>',
   cool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11"/><path d="M9 4l3 2.5L15 4M9 20l3-2.5L15 20"/></svg>',
   heat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
 };
 const TIMER_MINUTES = [30, 60, 120, 180, 240, 300, 360];
@@ -34,10 +35,13 @@ let units = [];
 let selected = null;
 try { selected = localStorage.getItem('airlan.selected'); } catch {}
 let pendingTemp = null, tempTimer = null, busy = false;
+let screen = 'unit'; // 'unit' | 'manage'
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => n == null ? '–' : n.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const unit = () => units.find((u) => u.airconId === selected);
+// Unnamed units are numbered so they can be told apart until the user names them.
+const displayName = (u) => u.name ?? `${t('newUnit')} ${units.filter((x) => !x.name).indexOf(u) + 1}`;
 const errorText = (err) => messages[`error.${err?.code}`] ?? err?.message ?? t('error.server');
 const timerLabel = (min) => min < 60 ? t('minutesShort', { n: min }) : t('hoursShort', { n: min / 60 });
 
@@ -59,7 +63,8 @@ async function api(method, path, body) {
 }
 
 async function refresh() {
-  if (busy) return;
+  // Don't re-render under someone who is typing a name or an address.
+  if (busy || document.activeElement?.tagName === 'INPUT') return;
   try {
     units = await api('GET', '/api/units');
     if (!unit()) selected = units[0]?.airconId ?? null;
@@ -71,8 +76,7 @@ async function refresh() {
   }
 }
 
-async function change(body, label) {
-  const u = unit();
+async function change(body, label, u = unit()) {
   busy = true;
   setStatus(label + '…');
   try {
@@ -113,10 +117,9 @@ function nudgeTemp(delta) {
   }, 700);
 }
 
-function rename() {
-  const u = unit();
-  const name = prompt(t('renamePrompt'), u.name);
-  if (name && name.trim() && name.trim() !== u.name) change({ name: name.trim() }, t('saving'));
+function rename(u = unit()) {
+  const name = prompt(t('renamePrompt'), u.name ?? '');
+  if (name && name.trim() && name.trim() !== u.name) change({ name: name.trim() }, t('saving'), u);
 }
 
 function remaining(offAt) {
@@ -132,26 +135,15 @@ function escape(s) {
 function render() {
   $('units').innerHTML = units.map((u) => `
     <button role="tab" aria-selected="${u.airconId === selected}" data-id="${u.airconId}">
-      <span class="dot ${u.power ? u.mode : ''}"></span>${escape(u.name)}
+      <span class="dot ${u.power ? u.mode : ''}"></span>${escape(displayName(u))}
     </button>`).join('');
-  $('units').hidden = units.length < 2;
+  $('units').style.visibility = units.length < 2 ? 'hidden' : '';
+  $('gear').innerHTML = ICONS.gear;
+  $('gear').setAttribute('aria-label', t('manage'));
+  $('topbar').hidden = screen === 'manage' || !units.length;
 
   const u = unit();
-  if (!u) {
-    $('view').innerHTML = `<div class="empty">${t('noUnits')}<br><button id="scan">${t('searchAgain')}</button></div>`;
-    $('scan').onclick = async () => {
-      setStatus(t('searching') + '…');
-      try {
-        units = await api('POST', '/api/scan');
-        selected = units[0]?.airconId;
-        render();
-        setStatus('');
-      } catch (e) {
-        setStatus(errorText(e), true);
-      }
-    };
-    return;
-  }
+  if (screen === 'manage' || !u) return renderManage();
 
   const accent = u.power && (u.mode === 'cool' || u.mode === 'heat') ? `var(--${u.mode})` : 'var(--off)';
   document.documentElement.style.setProperty('--accent', accent);
@@ -162,11 +154,21 @@ function render() {
     : t('unreachable');
   const offAtTime = u.offAt && new Date(u.offAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 
-  $('view').innerHTML = `
+  const naming = u.name ? '' : `
+    <section class="card naming">
+      <h2>${t('nameThisUnit')}</h2>
+      <p class="hint">${t('nameHint')}</p>
+      <form class="field" id="nameForm">
+        <input type="text" id="nameInput" maxlength="40" placeholder="${t('namePlaceholder')}" autocomplete="off">
+        <button class="btn primary">${t('save')}</button>
+      </form>
+    </section>`;
+
+  $('view').innerHTML = naming + `
     <section class="card">
       <div class="head">
         <div style="min-width:0">
-          <div class="name"><span>${escape(u.name)}</span><button class="rename" id="rename" aria-label="${t('rename')}">${ICONS.edit}</button></div>
+          <div class="name"><span>${escape(displayName(u))}</span><button class="rename" id="rename" aria-label="${t('rename')}">${ICONS.edit}</button></div>
           <div class="climate">${climate}</div>
         </div>
         <button class="power ${u.power ? 'on' : ''}" id="power" ${off ? 'disabled' : ''} aria-label="${u.power ? t('turnOff') : t('turnOn')}" aria-pressed="${!!u.power}">${ICONS.power}</button>
@@ -196,7 +198,12 @@ function render() {
         <p class="hint">${t('turnOnForTimer')}</p>`}
     </section>`;
 
-  $('rename').onclick = rename;
+  $('rename').onclick = () => rename(u);
+  if ($('nameForm')) $('nameForm').onsubmit = (e) => {
+    e.preventDefault();
+    const name = $('nameInput').value.trim();
+    if (name) change({ name }, t('saving'));
+  };
   $('power').onclick = () => change({ power: !u.power }, u.power ? t('turnOff') : t('turnOn'));
   $('down').onclick = () => nudgeTemp(-0.5);
   $('up').onclick = () => nudgeTemp(0.5);
@@ -206,6 +213,73 @@ function render() {
   document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer(Number(b.dataset.min)));
   if ($('cancel')) $('cancel').onclick = () => timer(null);
 }
+
+function renderManage() {
+  $('view').innerHTML = `
+    <div class="manage-head">
+      <h1>${t('manage')}</h1>
+      ${units.length ? `<button class="btn" id="done">${t('done')}</button>` : ''}
+    </div>
+    <section class="card">
+      ${units.length ? units.map((u) => `
+        <div class="row">
+          <div class="info"><b>${escape(displayName(u))}</b><small>${u.host} · ${u.online ? t('online') : t('unreachable')}</small></div>
+          <button class="btn" data-rename="${u.airconId}">${t('rename')}</button>
+          <button class="btn danger" data-forget="${u.airconId}">${t('forget')}</button>
+        </div>`).join('') : `<p class="hint">${t('noUnits')}</p>`}
+      <div class="field"><button class="btn primary" id="scan">${t('searchNetwork')}</button></div>
+    </section>
+    <section class="card">
+      <h2>${t('addByAddress')}</h2>
+      <p class="hint">${t('addByAddressHint')}</p>
+      <form class="field" id="addForm">
+        <input type="text" id="addInput" inputmode="decimal" placeholder="192.168.1.50" autocomplete="off">
+        <button class="btn">${t('add')}</button>
+      </form>
+    </section>`;
+
+  if ($('done')) $('done').onclick = () => { screen = 'unit'; render(); };
+  $('scan').onclick = async () => {
+    setStatus(t('searching') + '…');
+    try {
+      units = await api('POST', '/api/scan');
+      if (!unit()) selected = units[0]?.airconId ?? null;
+      render();
+      setStatus(t('searchResult', { n: units.length }));
+    } catch (e) {
+      setStatus(errorText(e), true);
+    }
+  };
+  $('addForm').onsubmit = async (e) => {
+    e.preventDefault();
+    setStatus(t('searching') + '…');
+    try {
+      const added = await api('POST', '/api/units', { host: $('addInput').value.trim() });
+      units = units.filter((u) => u.airconId !== added.airconId).concat(added);
+      selected = added.airconId;
+      screen = 'unit';
+      render();
+      setStatus('');
+    } catch (e) {
+      setStatus(errorText(e), true);
+    }
+  };
+  document.querySelectorAll('[data-rename]').forEach((b) => b.onclick = () => rename(units.find((u) => u.airconId === b.dataset.rename)));
+  document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = async () => {
+    const u = units.find((x) => x.airconId === b.dataset.forget);
+    if (!confirm(t('forgetConfirm', { name: displayName(u) }))) return;
+    try {
+      await api('DELETE', `/api/units/${u.airconId}`);
+      units = units.filter((x) => x !== u);
+      if (selected === u.airconId) selected = units[0]?.airconId ?? null;
+      render();
+    } catch (e) {
+      setStatus(errorText(e), true);
+    }
+  });
+}
+
+$('gear').onclick = () => { screen = 'manage'; render(); };
 
 $('units').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-id]');

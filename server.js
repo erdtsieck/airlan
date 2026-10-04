@@ -1,19 +1,19 @@
 // AirLAN server: talks directly to WF-RAC modules on the local network and serves a
 // mobile web app. No cloud, no dependencies.
 //
-//   node server.js            (port via AIRLAN_PORT, default 8321)
+//   node server.js    (AIRLAN_PORT, default 8321; AIRLAN_DATA_DIR, default ./data)
 
 import http from 'node:http';
-import net from 'node:net';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WfRacClient, WfRacError, MODE_NAMES, PORT as WFRAC_PORT } from './wfrac.js';
+import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = join(ROOT, 'data', 'state.json');
+const DATA_FILE = join(process.env.AIRLAN_DATA_DIR ?? join(ROOT, 'data'), 'state.json');
 const PUBLIC = join(ROOT, 'public');
 const HTTP_PORT = Number(process.env.AIRLAN_PORT ?? 8321);
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -26,7 +26,7 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 // ---------- persistent state ----------
 
-/** @type {{ deviceId: string, operatorId: string, units: {airconId: string, name: string, host: string, scheme?: string, offAt?: number}[] }} */
+/** @type {{ deviceId: string, operatorId: string, units: {airconId: string, name: string | null, host: string, scheme?: string, offAt?: number}[] }} */
 let store;
 
 async function loadStore() {
@@ -51,52 +51,43 @@ function saveStore() {
 
 // ---------- discovery ----------
 
-function lanAddresses() {
-  return Object.values(os.networkInterfaces())
-    .flat()
-    .filter((a) => a?.family === 'IPv4' && !a.internal && a.netmask === '255.255.255.0')
-    .map((a) => a.address);
-}
-
-const portOpen = (host) =>
-  new Promise((resolve) => {
-    const s = net.connect({ host, port: WFRAC_PORT });
-    const done = (ok) => { s.destroy(); resolve(ok); };
-    s.setTimeout(1500, () => done(false));
-    s.once('connect', () => done(true));
-    s.once('error', () => done(false));
-  });
-
 let lastScan = 0;
 let scanning = null;
 
-/** Scans the local /24 networks for WF-RAC modules and updates addresses (DHCP may move them). */
+/**
+ * Adds the module at `host`, or updates the address of a known one (DHCP may move it).
+ * New units get no name: the app asks the user for one.
+ */
+async function adopt(host) {
+  const probe = new WfRacClient({ host, ...ids() });
+  const { airconId } = await probe.getDeviceInfo();
+  let unit = store.units.find((u) => u.airconId === airconId);
+  if (!unit) {
+    unit = { airconId, name: null, host };
+    store.units.push(unit);
+    log(`new unit ${airconId} at ${host} (${probe.scheme})`);
+  } else if (unit.host !== host) {
+    log(`unit ${airconId} moved ${unit.host} -> ${host}`);
+    unit.host = host;
+  }
+  unit.scheme = probe.scheme;
+  clients.delete(airconId);
+  return unit;
+}
+
+/** Scans the local network for WF-RAC modules. */
 function scan() {
   if (scanning) return scanning;
   scanning = (async () => {
-    const prefixes = new Set(lanAddresses().map((a) => a.split('.').slice(0, 3).join('.')));
-    const hosts = [...prefixes].flatMap((p) => Array.from({ length: 254 }, (_, i) => `${p}.${i + 1}`));
-    const open = (await Promise.all(hosts.map(async (h) => ((await portOpen(h)) ? h : null)))).filter(Boolean);
+    const open = await findOpen(hostsToScan(os.networkInterfaces()));
     for (const host of open) {
-      const probe = new WfRacClient({ host, ...ids() });
       try {
-        const { airconId } = await probe.getDeviceInfo();
-        let unit = store.units.find((u) => u.airconId === airconId);
-        if (!unit) {
-          unit = { airconId, name: `Unit ${store.units.length + 1}`, host };
-          store.units.push(unit);
-          log(`new unit ${airconId} at ${host} (${probe.scheme})`);
-        } else if (unit.host !== host) {
-          log(`unit ${airconId} moved ${unit.host} -> ${host}`);
-          unit.host = host;
-        }
-        unit.scheme = probe.scheme;
+        await adopt(host);
       } catch (e) {
         log(`${host}:${WFRAC_PORT} is not a WF-RAC module (${e.message})`);
       }
     }
     lastScan = Date.now();
-    clients.clear();
     await saveStore();
   })().finally(() => { scanning = null; });
   return scanning;
@@ -236,7 +227,7 @@ function parseChange(body) {
 }
 
 async function unitView(unit) {
-  const base = { airconId: unit.airconId, name: unit.name, offAt: unit.offAt ?? null };
+  const base = { airconId: unit.airconId, name: unit.name, host: unit.host, offAt: unit.offAt ?? null };
   try {
     const { state } = await readStat(unit);
     return {
@@ -306,10 +297,32 @@ async function route(req, res) {
     await scan();
     return send(200, await Promise.all(store.units.map(unitView)));
   }
+  if (pathname === '/api/units' && req.method === 'POST') {
+    const { host } = await readJson(req);
+    if (!isIpv4(String(host))) throw new HttpError(400, 'invalid', 'host must be an IPv4 address');
+    let unit;
+    try {
+      unit = await adopt(host);
+    } catch (e) {
+      throw e instanceof WfRacError ? e : new HttpError(502, 'no_unit_at_address', `no WF-RAC module answers at ${host}`);
+    }
+    await saveStore();
+    return send(200, await unitView(unit));
+  }
 
   const m = pathname.match(/^\/api\/units\/([0-9a-f]{12})(\/timer)?$/);
   if (m) {
     const unit = findUnit(m[1]);
+    if (!m[2] && req.method === 'DELETE') {
+      await setTimer(unit, null);
+      store.units.splice(store.units.indexOf(unit), 1);
+      clients.delete(unit.airconId);
+      cache.delete(unit.airconId);
+      await saveStore();
+      log(`forgot unit ${unit.airconId}`);
+      res.writeHead(204).end();
+      return;
+    }
     if (!m[2] && req.method === 'PATCH') {
       const body = await readJson(req);
       if ('name' in body) {
@@ -347,9 +360,9 @@ async function route(req, res) {
 await loadStore();
 if (!store.units.length) {
   log('no units known yet, scanning the network…');
-  await scan();
+  scan().then(() => log(`scan found ${store.units.length} unit(s)`));
 }
-log(`${store.units.length} unit(s): ${store.units.map((u) => `${u.name} (${u.host})`).join(', ')}`);
+log(`${store.units.length} unit(s): ${store.units.map((u) => `${u.name ?? u.airconId} (${u.host})`).join(', ')}`);
 for (const unit of store.units) scheduleTimer(unit);
 await saveStore();
 
@@ -363,6 +376,6 @@ http
     });
   })
   .listen(HTTP_PORT, () => {
-    const urls = [`http://localhost:${HTTP_PORT}`, ...lanAddresses().map((a) => `http://${a}:${HTTP_PORT}`)];
+    const urls = [`http://localhost:${HTTP_PORT}`, ...lanAddresses(os.networkInterfaces()).map((a) => `http://${a}:${HTTP_PORT}`)];
     log(`AirLAN running: ${urls.join('  ')}`);
   });

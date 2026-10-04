@@ -34,11 +34,21 @@ cd airlan
 npm start
 ```
 
-On first start AirLAN scans the local network for units. Open
-`http://<ip-of-that-machine>:8321` on your phone and use "Add to Home screen". Give each
-unit a name with the pencil icon.
+Open `http://<ip-of-that-machine>:8321` on your phone and use "Add to Home screen".
 
-Set `AIRLAN_PORT` to use another port.
+On first start AirLAN scans the local network for units, and the app asks you to name each
+one it finds. Not sure which unit is which? Switch it on from the app and listen. The gear
+icon opens *Manage units*: search the network again (for a new unit), add a unit by IP
+address, rename or forget one.
+
+The scan covers networks up to /22 completely; on larger networks only the /24 around the
+server's own address. If your units live on a separate network (an IoT VLAN, for
+instance), add them by IP address and make sure the server can reach port 51443 there.
+
+| Variable | Default | |
+|---|---|---|
+| `AIRLAN_PORT` | `8321` | Port of the web app and API |
+| `AIRLAN_DATA_DIR` | `./data` | Where `state.json` is kept |
 
 On Windows, `start.ps1 -Install` registers a task that starts the server at logon and
 opens the firewall for the local subnet (it asks for elevation). `start.ps1 -Uninstall`
@@ -64,6 +74,7 @@ with your result (the firmware branch and versions are in the `getAirconStat` re
   with a base64 `airconStat` frame. The encoder and decoder are a port of
   [pywfrac](https://github.com/blues-sechseck/pywfrac) and are tested byte for byte
   against it.
+- `discovery.js`: which addresses to scan, and the port probe.
 - `server.js`: HTTP server and API. It discovers units, follows them when DHCP gives them
   a new address, registers itself as an account with each unit and runs the switch-off
   timers.
@@ -75,14 +86,17 @@ with your result (the firmware branch and versions are in the `getAirconStat` re
 
 | Request | Effect |
 |---|---|
-| `GET /api/units` | All units with their current state |
+| `GET /api/units` | All units with their current state; `name` is `null` until the user names it |
+| `POST /api/units` | Body `{ "host": "192.168.1.50" }`: add the unit at that address |
 | `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `name` |
+| `DELETE /api/units/:id` | Forget the unit |
 | `PUT /api/units/:id/timer` | Body `{ "minutes": 1–360 }`: switch off after that time |
 | `DELETE /api/units/:id/timer` | Cancel the timer |
 | `POST /api/scan` | Scan the network for units again |
 
 Errors come back as `{ "error": { "code", "message" } }` with `code` one of
-`unreachable`, `unit_refused`, `bad_response`, `invalid`, `not_found`.
+`unreachable`, `unit_refused`, `bad_response`, `invalid`, `not_found`,
+`no_unit_at_address`.
 
 ## Limitations and quirks
 

@@ -23,6 +23,7 @@
             --cool: #4ea3ff; --heat: #ff8a3d; --off: #5d6470; --danger: #ff6b6b; }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   body { padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
@@ -76,13 +77,34 @@
 
   .status { min-height: 20px; text-align: center; font-size: 14px; color: var(--muted); }
   .status.error { color: var(--danger); }
-  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
-  .empty button { margin-top: 12px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line); }
+  .topbar { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; }
+  .topbar .units { flex: 1; margin-bottom: 0; }
+  .gear { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--card);
+    display: grid; place-items: center; color: var(--muted); }
+  .gear svg { width: 20px; height: 20px; }
+  .btn { padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); }
+  .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .btn.danger { color: var(--danger); }
+  input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px; width: 100%; min-width: 0; }
+  .field { display: flex; gap: 8px; margin-top: 12px; }
+  .field .btn { flex: 0 0 auto; }
+  .naming { border-color: var(--cool); }
+  .row { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row .info { flex: 1; min-width: 0; }
+  .row .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .info small { color: var(--muted); }
+  .manage-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .manage-head h1 { font-size: 22px; margin: 0; }
 </style>
 </head>
 <body>
 <main>
-  <nav class="units" role="tablist" id="units"></nav>
+  <div class="topbar" id="topbar" hidden>
+    <nav class="units" role="tablist" id="units"></nav>
+    <button class="gear" id="gear"></button>
+  </div>
   <div id="view"></div>
   <p class="status" id="status" role="status"></p>
 </main>
