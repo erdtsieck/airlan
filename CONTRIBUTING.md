@@ -29,7 +29,7 @@ Remove your unit's `airconId` and MAC address if you prefer.
 
 ## Setting up your environment
 
-You only need Node.js 20 or newer. AirLAN has no dependencies.
+You only need Node.js 22 or newer. AirLAN has no dependencies.
 
 ```sh
 npm test     # run the tests

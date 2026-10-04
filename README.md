@@ -19,7 +19,7 @@ follows your browser's language and light/dark theme.
 
 ## Requirements
 
-- Node.js 20 or newer. No other dependencies.
+- Node.js 22 or newer. No other dependencies.
 - A machine on the same network as the air conditioners that stays on: the switch-off
   timer runs in the server, so it only fires while the server is running. A Raspberry Pi,
   NAS or always-on PC works well.

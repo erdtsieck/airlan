@@ -6,7 +6,7 @@
   "license": "MIT",
   "author": "Anne Erdtsieck-Wijnen",
   "repository": "github:erdtsieck/airlan",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
