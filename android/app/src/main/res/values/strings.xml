@@ -37,7 +37,10 @@
     <string name="no_units">No air conditioner found on the network.</string>
     <string name="search_network">Search the network</string>
     <string name="searching">Searching…</string>
-    <string name="search_result">Found %1$d unit(s).</string>
+    <plurals name="search_result">
+        <item quantity="one">Found %1$d unit.</item>
+        <item quantity="other">Found %1$d units.</item>
+    </plurals>
     <string name="add_by_address">Add by IP address</string>
     <string name="add_by_address_hint">Use this if your units are on a separate network, such as an IoT network.</string>
     <string name="add">Add</string>

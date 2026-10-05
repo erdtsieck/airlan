@@ -33,7 +33,8 @@ data class UnitUi(val stored: StoredUnit, val state: AirconState?, @StringRes va
 
 enum class Screen { UNIT, MANAGE }
 
-data class Status(@StringRes val text: Int, val arg: Int? = null, val isError: Boolean = false)
+/** A line under the controls: a string, or a plural when [plural] is set, with [arg] as its number. */
+data class Status(val text: Int, val arg: Int? = null, val isError: Boolean = false, val plural: Boolean = false)
 
 data class UiState(
     val loaded: Boolean = false,
@@ -93,7 +94,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val n = repo.scan()
             refresh()
-            ui.update { it.copy(status = Status(R.string.search_result, n)) }
+            ui.update { it.copy(status = Status(R.plurals.search_result, n, plural = true)) }
         } catch (e: Exception) {
             fail(e)
         } finally {

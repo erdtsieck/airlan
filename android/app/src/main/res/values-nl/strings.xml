@@ -36,7 +36,10 @@
     <string name="no_units">Geen airco gevonden op het netwerk.</string>
     <string name="search_network">Netwerk doorzoeken</string>
     <string name="searching">Zoeken…</string>
-    <string name="search_result">%1$d airco(’s) gevonden.</string>
+    <plurals name="search_result">
+        <item quantity="one">%1$d airco gevonden.</item>
+        <item quantity="other">%1$d airco’s gevonden.</item>
+    </plurals>
     <string name="add_by_address">Toevoegen op IP-adres</string>
     <string name="add_by_address_hint">Gebruik dit als je airco’s op een apart netwerk staan, zoals een IoT-netwerk.</string>
     <string name="add">Toevoegen</string>
