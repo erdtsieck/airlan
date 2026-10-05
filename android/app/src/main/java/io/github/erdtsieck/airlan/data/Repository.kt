@@ -12,6 +12,7 @@ import java.net.InetAddress
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withLock
 
 /** Schedules the moment a unit's off-timer fires. Backed by AlarmManager on the device. */
@@ -179,7 +180,9 @@ class Repository(
             return TimerOutcome.NotDue
         }
         return try {
-            apply(airconId) { it.copy(power = false) }
+            // Runs inside a broadcast receiver, which Android gives about a minute. An
+            // unreachable unit costs a timeout per transport plus a rescan, so bound the attempt.
+            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId) { it.copy(power = false) } }
             store.updateUnit(airconId) { it.copy(offAt = null) }
             TimerOutcome.SwitchedOff
         } catch (e: Exception) {
@@ -202,6 +205,7 @@ class Repository(
         const val MAX_TIMER_MINUTES = 6 * 60
         const val TIMER_ATTEMPTS = 20
         const val TIMER_RETRY_MS = 30_000L
+        const val TIMER_ATTEMPT_TIMEOUT_MS = 40_000L
 
         fun isIpv4(s: String): Boolean {
             val parts = s.split('.')
