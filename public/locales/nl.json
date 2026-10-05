@@ -51,5 +51,10 @@
   "forget": "Vergeten",
   "forgetConfirm": "{name} vergeten? Je kunt hem later terugvinden door te zoeken.",
   "online": "online",
-  "error.no_unit_at_address": "Op dat adres antwoordt geen airco."
+  "error.no_unit_at_address": "Op dat adres antwoordt geen airco.",
+  "about": "Over AirLAN",
+  "aboutText": "AirLAN is gratis en open source. Scheelt het je wat ergernis, dan kun je de maker op een koffie trakteren.",
+  "sourceCode": "Broncode op GitHub",
+  "buyCoffee": "☕ Trakteer op koffie",
+  "sponsor": "Sponsor op GitHub"
 }

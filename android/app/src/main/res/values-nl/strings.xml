@@ -47,6 +47,9 @@
     <string name="add">Toevoegen</string>
     <string name="forget">Vergeten</string>
     <string name="forget_confirm">%1$s vergeten? Je kunt hem later terugvinden door te zoeken.</string>
+    <string name="about">Over AirLAN</string>
+    <string name="about_text">AirLAN is gratis en open source.</string>
+    <string name="source_code">Broncode op GitHub</string>
     <string name="online">online</string>
     <string name="home_network_only">AirLAN werkt alleen op je thuisnetwerk. Maak verbinding met de wifi waarop je airco’s zitten.</string>
     <string name="permission_title">Toegang tot je thuisnetwerk</string>

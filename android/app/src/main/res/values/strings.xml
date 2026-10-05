@@ -48,6 +48,9 @@
     <string name="add">Add</string>
     <string name="forget">Forget</string>
     <string name="forget_confirm">Forget %1$s? You can find it again by searching.</string>
+    <string name="about">About AirLAN</string>
+    <string name="about_text">AirLAN is free and open source.</string>
+    <string name="source_code">Source code on GitHub</string>
     <string name="online">online</string>
     <string name="home_network_only">AirLAN works on your home network only. Connect to the Wi-Fi network your air conditioners are on.</string>
     <string name="permission_title">Access to your home network</string>

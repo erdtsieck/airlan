@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -66,6 +67,7 @@ import java.util.Locale
 import kotlinx.coroutines.delay
 
 private val TIMER_MINUTES = listOf(30, 60, 120, 180, 240, 300, 360)
+private const val PROJECT_URL = "https://github.com/erdtsieck/airlan"
 
 private fun fmt(t: Double?) = t?.let { String.format(Locale.getDefault(), "%.1f", it) } ?: "–"
 
@@ -463,6 +465,15 @@ fun ManageScreen(
             Spacer(Modifier.width(8.dp))
             Pill(stringResource(R.string.add), { onAdd(host) { host = "" } }, enabled = host.isNotBlank() && !state.busy)
         }
+    }
+
+    // A link to the project only. Google Play does not allow links to outside payment pages
+    // (donations included) in the app; the project page carries the support links.
+    val uriHandler = LocalUriHandler.current
+    Card {
+        Heading(stringResource(R.string.about))
+        Hint(stringResource(R.string.about_text))
+        Pill(stringResource(R.string.source_code), { uriHandler.openUri(PROJECT_URL) }, Modifier.padding(top = 12.dp))
     }
 
     StatusLine(state.status)

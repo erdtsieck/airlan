@@ -51,5 +51,10 @@
   "forget": "Forget",
   "forgetConfirm": "Forget {name}? You can find it again by searching.",
   "online": "online",
-  "error.no_unit_at_address": "No air conditioner answers at that address."
+  "error.no_unit_at_address": "No air conditioner answers at that address.",
+  "about": "About AirLAN",
+  "aboutText": "AirLAN is free and open source. If it saves you some frustration, you can buy the maker a coffee.",
+  "sourceCode": "Source code on GitHub",
+  "buyCoffee": "☕ Buy me a coffee",
+  "sponsor": "Sponsor on GitHub"
 }

@@ -178,6 +178,15 @@ with one `values-<language>/strings.xml` per translation.
 
 Available: English, Dutch.
 
+## Support
+
+AirLAN is free. If it saves you some frustration, you can
+[buy me a coffee](https://buymeacoffee.com/erdtsieck) or
+[sponsor me on GitHub](https://github.com/sponsors/erdtsieck).
+
+The Android app links only to this page: Google Play does not allow links to payment pages
+outside Google Play in apps.
+
 ## Contributing
 
 We take Pull Requests! See [CONTRIBUTING.md](CONTRIBUTING.md).
