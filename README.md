@@ -2,7 +2,10 @@
 
 Simple, cloud-free control for Mitsubishi Heavy Industries air conditioners with the
 **WF-RAC** Wi-Fi module (the module behind the Smart M-Air app). AirLAN talks to the units
-directly over your home network and serves a small mobile web app.
+directly over your home network. It comes in two forms:
+
+- an **Android app** ([`android/`](android)) that talks to the units itself, and
+- a small **server with a web app**, for any phone or computer on the network.
 
 Per unit you can:
 
@@ -11,13 +14,35 @@ Per unit you can:
 - set the temperature (16–30 °C in 0.5° steps)
 - have it switch off automatically after 30 minutes or 1–6 hours
 
-That is all, on purpose. Indoor and outdoor temperature are shown along the way. The app
-follows your browser's language and light/dark theme.
+That is all, on purpose. Indoor and outdoor temperature are shown along the way. Both
+follow the device's language (English and Dutch so far) and light/dark theme.
 
 > AirLAN is an independent project. It is not affiliated with, endorsed by or supported by
 > Mitsubishi Heavy Industries. "Works with" means: tested against WF-RAC modules, see below.
 
-## Requirements
+## Android app
+
+The app finds the units on your Wi-Fi network, asks you to name them, and runs the
+switch-off timer as an alarm on the phone: it fires with the app closed, survives a
+restart, retries for ten minutes if the unit cannot be reached and then notifies you. The
+phone has to be on the home network when the timer fires.
+
+On Android 17 and newer the app asks for the *Nearby devices* permission, which Android
+requires for talking to devices on the local network.
+
+Build it with Android Studio, or from the command line with JDK 21 and the Android SDK:
+
+```sh
+cd android
+./gradlew :app:assembleDebug     # app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:testDebugUnitTest
+```
+
+Publishing on Google Play is described in [docs/play-store](docs/play-store).
+
+## Server and web app
+
+### Requirements
 
 - Node.js 22 or newer. No other dependencies.
 - A machine on the same network as the air conditioners that stays on: the switch-off
@@ -26,7 +51,7 @@ follows your browser's language and light/dark theme.
 - The units must already be connected to Wi-Fi (for example with the Smart M-Air app).
   AirLAN does not do the initial Wi-Fi setup.
 
-## Getting started
+### Getting started
 
 ```sh
 git clone https://github.com/erdtsieck/airlan.git
@@ -128,7 +153,12 @@ pip install pywfrac==0.1.7
 python tools/gen_pywfrac_vectors.py
 ```
 
-`test/fixtures/test-unit.key` is a throwaway key for the local HTTPS test server.
+`test/fixtures/test-unit.key` is a throwaway key for the local HTTPS test server. The
+Android tests in `android/app/src/test` use the same fixtures.
+
+No air conditioner at hand? `node tools/fake-unit.mjs` runs a stand-in that answers like
+an HTTP-firmware unit, keeps its state and logs every change. It also refuses what the real
+module refuses: writes from unregistered operators and request bodies with `\/` escapes.
 
 ## Disclaimer
 
@@ -142,6 +172,9 @@ it picks the first of the browser's preferred languages it has a file for, and f
 to English for anything missing. To add a language, copy `en.json` to your language code
 (for example `de.json`) and translate the values. Keep the `{placeholders}` as they are;
 `npm test` checks that every translation has the same keys and placeholders as English.
+
+The Android app keeps its text in `android/app/src/main/res/values/strings.xml` (English)
+with one `values-<language>/strings.xml` per translation.
 
 Available: English, Dutch.
 
