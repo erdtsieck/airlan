@@ -29,6 +29,12 @@ const ICONS = {
   edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
 };
 const TIMER_MINUTES = [30, 60, 120, 180, 240, 300, 360];
+// Forks: point these at your own project and support pages.
+const PROJECT_URL = 'https://github.com/erdtsieck/airlan';
+const SUPPORT = [
+  ['buyCoffee', 'https://buymeacoffee.com/erdtsieck'],
+  ['sponsor', 'https://github.com/sponsors/erdtsieck'],
+];
 const TEMP_MIN = 16, TEMP_MAX = 30;
 
 let units = [];
@@ -242,6 +248,14 @@ function renderManage() {
         <input type="text" id="addInput" inputmode="decimal" placeholder="192.168.1.50" autocomplete="off">
         <button class="btn">${t('add')}</button>
       </form>
+    </section>
+    <section class="card">
+      <h2>${t('about')}</h2>
+      <p class="hint">${t('aboutText')}</p>
+      <div class="links">
+        <a class="btn" href="${PROJECT_URL}" target="_blank" rel="noopener">${t('sourceCode')}</a>
+        ${SUPPORT.map(([key, url]) => `<a class="btn" href="${url}" target="_blank" rel="noopener">${t(key)}</a>`).join('')}
+      </div>
     </section>`;
 
   if ($('done')) $('done').onclick = () => { screen = 'unit'; render(); };
