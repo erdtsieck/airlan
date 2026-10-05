@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#1D7FE0</color>
+    <!-- Compose draws everything; the window theme only sets the colours seen before it does. -->
+    <style name="Theme.AirLAN" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>
