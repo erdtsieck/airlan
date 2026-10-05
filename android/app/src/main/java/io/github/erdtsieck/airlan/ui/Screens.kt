@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -179,7 +180,13 @@ private fun RoundButton(
 @Composable
 private fun StatusLine(status: Status?) {
     val c = LocalAirColors.current
-    val text = status?.let { if (it.arg != null) stringResource(it.text, it.arg) else stringResource(it.text) } ?: ""
+    val text = status?.let {
+        when {
+            it.plural -> pluralStringResource(it.text, it.arg ?: 0, it.arg ?: 0)
+            it.arg != null -> stringResource(it.text, it.arg)
+            else -> stringResource(it.text)
+        }
+    } ?: ""
     Text(
         text,
         color = if (status?.isError == true) c.danger else c.muted,

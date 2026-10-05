@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Back up the list of units and their names, so a new phone knows them. Nothing else is stored. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="state.json" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="state.json" />
+    </device-transfer>
+</data-extraction-rules>

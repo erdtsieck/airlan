@@ -1,5 +1,6 @@
 package io.github.erdtsieck.airlan.wfrac
 
+import android.annotation.SuppressLint
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -25,8 +26,10 @@ class WfRacException(val code: String, message: String, val result: Int? = null)
 /**
  * The HTTPS firmware presents a self-signed certificate per unit, so there is no authority
  * to check it against. Instead the certificate seen on first contact is trusted and pinned
- * (trust on first use); afterwards only that certificate is accepted.
+ * (trust on first use); afterwards only that certificate is accepted. Lint flags any custom
+ * trust manager; this one does validate, against the pin, and refuses a changed certificate.
  */
+@SuppressLint("CustomX509TrustManager")
 internal class PinningTrustManager(private val expectedPin: String?) : X509TrustManager {
     var observedPin: String? = null
         private set
