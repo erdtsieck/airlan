@@ -125,7 +125,8 @@ function rename(u = unit()) {
 function remaining(offAt) {
   const min = Math.max(0, Math.ceil((offAt - Date.now()) / 60000));
   const h = Math.floor(min / 60);
-  return h ? t('remainingHours', { h, m: min % 60 }) : t('remainingMinutes', { m: min });
+  if (!h) return t('remainingMinutes', { m: min });
+  return min % 60 ? t('remainingHours', { h, m: min % 60 }) : t('remainingWholeHours', { h });
 }
 
 function escape(s) {
@@ -149,8 +150,13 @@ function render() {
   document.documentElement.style.setProperty('--accent', accent);
   const off = !u.online || busy;
   const temp = pendingTemp ?? u.presetTemp;
+  // Only temperatures the unit actually reported.
   const climate = u.online
-    ? `${t('indoor')} ${fmt(u.indoorTemp)}° · ${t('outdoor')} ${fmt(u.outdoorTemp)}°${u.errorCode ? ` · ${t('fault')} ${u.errorCode}` : ''}`
+    ? [
+        u.indoorTemp != null && `${t('indoor')} ${fmt(u.indoorTemp)}°`,
+        u.outdoorTemp != null && `${t('outdoor')} ${fmt(u.outdoorTemp)}°`,
+        u.errorCode && `${t('fault')} ${u.errorCode}`,
+      ].filter(Boolean).join(' · ')
     : t('unreachable');
   const offAtTime = u.offAt && new Date(u.offAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 

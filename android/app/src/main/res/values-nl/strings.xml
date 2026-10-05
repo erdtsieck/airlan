@@ -7,6 +7,7 @@
     <string name="mode_dry">Drogen</string>
     <string name="mode_unknown">Onbekend</string>
     <string name="climate">Binnen %1$s° · buiten %2$s°</string>
+    <string name="climate_indoor">Binnen %1$s°</string>
     <string name="fault">storing %1$s</string>
     <string name="unreachable">Niet bereikbaar</string>
     <string name="set">ingesteld</string>
@@ -23,6 +24,7 @@
     <string name="cancel">Annuleren</string>
     <string name="turn_on_for_timer">Zet de airco aan om een uitschakeltijd te kiezen.</string>
     <string name="remaining_hours">nog %1$d u %2$d min</string>
+    <string name="remaining_whole_hours">nog %1$d u</string>
     <string name="remaining_minutes">nog %1$d min</string>
     <string name="minutes_short">%1$d min</string>
     <string name="hours_short">%1$d u</string>

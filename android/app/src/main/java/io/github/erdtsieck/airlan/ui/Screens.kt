@@ -129,6 +129,7 @@ private fun Pill(
     textColor: Color? = null,
     icon: ImageVector? = null,
     shape: RoundedCornerShape = RoundedCornerShape(12.dp),
+    horizontalPadding: Dp = 14.dp,
 ) {
     val c = LocalAirColors.current
     Row(
@@ -137,7 +138,7 @@ private fun Pill(
             .background(filled ?: c.card)
             .border(1.dp, filled ?: c.line, shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 11.dp),
+            .padding(horizontal = horizontalPadding, vertical = 11.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -296,8 +297,14 @@ fun UnitScreen(
                     )
                 }
                 val climate = if (s == null) stringResource(R.string.unreachable)
-                else stringResource(R.string.climate, fmt(s.indoorTemp), fmt(s.outdoorTemp)) +
-                    (s.errorCode?.let { " · " + stringResource(R.string.fault, it) } ?: "")
+                else listOfNotNull(
+                    when {
+                        s.indoorTemp != null && s.outdoorTemp != null -> stringResource(R.string.climate, fmt(s.indoorTemp), fmt(s.outdoorTemp))
+                        s.indoorTemp != null -> stringResource(R.string.climate_indoor, fmt(s.indoorTemp))
+                        else -> null
+                    },
+                    s.errorCode?.let { stringResource(R.string.fault, it) },
+                ).joinToString(" · ")
                 Text(climate, color = c.muted, fontSize = 14.sp)
             }
             RoundButton(
@@ -354,7 +361,13 @@ fun UnitScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.off_at, DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(offAt))), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = c.text)
-                        Hint(if (minutes >= 60) stringResource(R.string.remaining_hours, minutes / 60, minutes % 60) else stringResource(R.string.remaining_minutes, minutes))
+                        Hint(
+                            when {
+                                minutes >= 60 && minutes % 60 == 0 -> stringResource(R.string.remaining_whole_hours, minutes / 60)
+                                minutes >= 60 -> stringResource(R.string.remaining_hours, minutes / 60, minutes % 60)
+                                else -> stringResource(R.string.remaining_minutes, minutes)
+                            },
+                        )
                     }
                     Pill(stringResource(R.string.cancel), onCancelTimer)
                 }
@@ -367,6 +380,7 @@ fun UnitScreen(
                             { onTimer(m) },
                             Modifier.weight(1f),
                             enabled = !disabled,
+                            horizontalPadding = 4.dp,
                         )
                     }
                     repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }

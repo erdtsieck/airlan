@@ -23,6 +23,7 @@
   "cancel": "Annuleren",
   "turnOnForTimer": "Zet de airco aan om een uitschakeltijd te kiezen.",
   "remainingHours": "nog {h} u {m} min",
+  "remainingWholeHours": "nog {h} u",
   "remainingMinutes": "nog {m} min",
   "minutesShort": "{n} min",
   "hoursShort": "{n} u",
