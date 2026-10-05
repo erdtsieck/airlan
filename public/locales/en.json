@@ -23,6 +23,7 @@
   "cancel": "Cancel",
   "turnOnForTimer": "Turn the unit on to pick a switch-off time.",
   "remainingHours": "{h} h {m} min left",
+  "remainingWholeHours": "{h} h left",
   "remainingMinutes": "{m} min left",
   "minutesShort": "{n} min",
   "hoursShort": "{n} h",
