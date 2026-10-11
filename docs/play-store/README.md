@@ -6,7 +6,7 @@ developer's own account and identity; everything else is in this folder.
 | File | Use |
 |---|---|
 | `listing-en.md`, `listing-nl.md` | Store listing texts (name, short and full description) |
-| `screenshots/en/`, `screenshots/nl/` | Phone screenshots, 1080×2160 |
+| `screenshots/en/`, `screenshots/nl/` | Phone screenshots, 1080×1920 (9:16) |
 | `feature-graphic.png` | Feature graphic, 1024×500 |
 | `icon-512.png` | App icon, 512×512 |
 | `../privacy.md` | Privacy policy, published at https://erdtsieck.github.io/airlan/privacy |
@@ -84,4 +84,4 @@ Play support can reset it, but that takes days.
 
 Run the stand-in units (`tools/fake-unit.mjs` with `--host`, `--power`, `--mode`,
 `--temp`, `--indoor`, `--outdoor`), add them in the emulator by address, and capture at
-1080×2400, cropped to 1080×2160: Play allows at most a 2:1 aspect ratio.
+1080×2400, cropped to 1080×1920: Play requires phone screenshots in 16:9 or 9:16.
