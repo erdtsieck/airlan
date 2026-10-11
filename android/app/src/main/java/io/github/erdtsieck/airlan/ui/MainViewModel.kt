@@ -115,6 +115,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Adds the simulated unit and shows it, for trying the app without an air conditioner. */
+    fun addDemo() = viewModelScope.launch {
+        try {
+            val unit = repo.addDemo(app.getString(R.string.demo_unit_name))
+            refresh()
+            ui.update { it.copy(selectedId = unit.airconId, screen = Screen.UNIT, status = null) }
+        } catch (e: Exception) {
+            fail(e)
+        }
+    }
+
     fun rename(airconId: String, name: String) = viewModelScope.launch {
         try {
             repo.rename(airconId, name)

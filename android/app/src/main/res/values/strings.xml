@@ -49,6 +49,12 @@
     <string name="forget">Forget</string>
     <string name="forget_confirm">Forget %1$s? You can find it again by searching.</string>
     <string name="online">online</string>
+    <string name="demo_title">No air conditioner at hand?</string>
+    <string name="demo_hint">Try AirLAN with a simulated air conditioner. It works like a real one, timer included, and you can forget it at any time.</string>
+    <string name="try_demo">Try a demo unit</string>
+    <string name="demo_unit_name">Demo unit</string>
+    <string name="demo_badge">Demo</string>
+    <string name="forget_demo_confirm">Forget %1$s? You can add the demo unit again at any time.</string>
     <string name="home_network_only">AirLAN works on your home network only. Connect to the Wi-Fi network your air conditioners are on.</string>
     <string name="permission_title">Access to your home network</string>
     <string name="permission_text">AirLAN talks to your air conditioners directly over your home network, without a cloud. Android asks you to allow that as “Nearby devices”.</string>

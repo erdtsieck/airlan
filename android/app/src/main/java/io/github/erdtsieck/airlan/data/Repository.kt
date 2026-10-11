@@ -3,7 +3,9 @@ package io.github.erdtsieck.airlan.data
 import io.github.erdtsieck.airlan.discovery.Discovery
 import io.github.erdtsieck.airlan.discovery.LocalAddress
 import io.github.erdtsieck.airlan.discovery.hostsToScan
+import io.github.erdtsieck.airlan.wfrac.AirconClient
 import io.github.erdtsieck.airlan.wfrac.AirconState
+import io.github.erdtsieck.airlan.wfrac.DemoClient
 import io.github.erdtsieck.airlan.wfrac.WFRAC_PORT
 import io.github.erdtsieck.airlan.wfrac.WfRacClient
 import io.github.erdtsieck.airlan.wfrac.WfRacException
@@ -40,23 +42,30 @@ class Repository(
 ) {
     val units get() = store.state
 
-    private val clients = ConcurrentHashMap<String, WfRacClient>()
+    /** A client together with the address it was made for, so a unit that moved gets a new one. */
+    private class Connection(val host: String, val client: AirconClient)
+
+    private val clients = ConcurrentHashMap<String, Connection>()
     private val registered = ConcurrentHashMap.newKeySet<String>()
     private val scanMutex = Mutex()
     private var lastScan = 0L
 
-    private fun clientFor(unit: StoredUnit): WfRacClient {
+    private fun clientFor(unit: StoredUnit): AirconClient =
+        clients.compute(unit.airconId) { _, existing ->
+            existing?.takeIf { it.host == unit.host } ?: Connection(unit.host, newClient(unit))
+        }!!.client
+
+    /** The one place that decides how a stored unit is reached: over the network, or simulated. */
+    private fun newClient(unit: StoredUnit): AirconClient {
+        if (unit.demo) return DemoClient(now)
         val ids = store.state.value
-        return clients.compute(unit.airconId) { _, existing ->
-            existing?.takeIf { it.host == unit.host }
-                ?: WfRacClient(unit.host, ids.deviceId, ids.operatorId, unit.scheme, unit.certificatePin, port, clientIntervalMs)
-        }!!
+        return WfRacClient(unit.host, ids.deviceId, ids.operatorId, unit.scheme, unit.certificatePin, port, clientIntervalMs)
     }
 
     private fun require(airconId: String) = store.unit(airconId) ?: throw IllegalArgumentException("unknown unit $airconId")
 
     /** Runs [block] against a unit; on a network failure, rescans (at most once a minute) and retries. */
-    private suspend fun <T> withUnit(airconId: String, block: suspend (WfRacClient) -> T): T {
+    private suspend fun <T> withUnit(airconId: String, block: suspend (AirconClient) -> T): T {
         val client = clientFor(require(airconId))
         try {
             return block(client)
@@ -69,7 +78,7 @@ class Repository(
         }
     }
 
-    private suspend fun persistTransport(airconId: String, client: WfRacClient) {
+    private suspend fun persistTransport(airconId: String, client: AirconClient) {
         val unit = store.unit(airconId) ?: return
         val scheme = client.scheme ?: return
         if (unit.scheme != scheme || unit.certificatePin != client.certificatePin) {
@@ -116,17 +125,31 @@ class Repository(
         return require(airconId)
     }
 
-    /** Scans the local network for units. Returns the number of units known afterwards. */
+    /** Scans the local network for units. Returns the number of units it found. */
     suspend fun scan(): Int = scanMutex.withLock {
+        var found = 0
         for (host in Discovery.findOpen(hostsToScan(localAddresses()), port)) {
             try {
                 adopt(host)
+                found++
             } catch (e: NoUnitAtAddressException) {
                 // Something else listens on the module's port.
             }
         }
         lastScan = now()
-        store.state.value.units.size
+        found
+    }
+
+    /**
+     * Adds the demo unit, a simulated air conditioner for trying the app without one, or
+     * returns it when it is there already. Scans never find it and leave it alone.
+     */
+    suspend fun addDemo(name: String): StoredUnit {
+        store.update { s ->
+            if (s.units.any { it.airconId == DEMO_AIRCON_ID }) s
+            else s.copy(units = s.units + StoredUnit(DEMO_AIRCON_ID, name, host = DEMO_HOST, demo = true))
+        }
+        return require(DEMO_AIRCON_ID)
     }
 
     /** Adds a unit by address, as typed by the user. */
@@ -206,6 +229,10 @@ class Repository(
         const val TIMER_ATTEMPTS = 20
         const val TIMER_RETRY_MS = 30_000L
         const val TIMER_ATTEMPT_TIMEOUT_MS = 40_000L
+
+        /** Real units are identified by their MAC address, so this cannot collide with one. */
+        const val DEMO_AIRCON_ID = "demo"
+        private const val DEMO_HOST = "demo"
 
         fun isIpv4(s: String): Boolean {
             val parts = s.split('.')

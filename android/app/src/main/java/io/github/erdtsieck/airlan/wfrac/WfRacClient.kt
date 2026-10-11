@@ -22,12 +22,12 @@ class WfRacClient(
     val host: String,
     private val deviceId: String,
     private val operatorId: String,
-    var scheme: Scheme? = null,
-    var certificatePin: String? = null,
+    override var scheme: Scheme? = null,
+    override var certificatePin: String? = null,
     private val port: Int = WFRAC_PORT,
     private val minIntervalMs: Long = 1100,
     private val timeoutMs: Int = 6000,
-) {
+) : AirconClient {
     private val mutex = Mutex()
     private var lastRequestAt = 0L
 
@@ -86,16 +86,15 @@ class WfRacClient(
 
     suspend fun getDeviceInfo(): String = request("getDeviceInfo", emptyMap()).getString("airconId")
 
-    suspend fun getStat(airconId: String): AirconState =
+    override suspend fun getStat(airconId: String): AirconState =
         Codec.decode(request("getAirconStat", mapOf("airconId" to airconId)).getString("airconStat"))
 
-    suspend fun setStat(airconId: String, state: AirconState): AirconState =
+    override suspend fun setStat(airconId: String, state: AirconState): AirconState =
         Codec.decode(
             request("setAirconStat", mapOf("airconId" to airconId, "airconStat" to Codec.encode(state))).getString("airconStat"),
         )
 
-    /** Writes require a registered account (4 slots per unit). Re-registering the same id is idempotent. */
-    suspend fun registerAccount(airconId: String, timezone: String) {
+    override suspend fun registerAccount(airconId: String, timezone: String) {
         request("updateAccountInfo", mapOf("accountId" to operatorId, "airconId" to airconId, "remote" to 0, "timezone" to timezone))
     }
 }

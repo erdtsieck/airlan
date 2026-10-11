@@ -127,6 +127,7 @@ private fun App(vm: MainViewModel) {
             onDone = { vm.showManage(false) },
             onScan = vm::scan,
             onAdd = vm::add,
+            onDemo = vm::addDemo,
             onRename = vm::rename,
             onForget = vm::forget,
         )

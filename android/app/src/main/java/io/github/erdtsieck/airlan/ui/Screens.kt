@@ -197,6 +197,23 @@ private fun StatusLine(status: Status?) {
     )
 }
 
+/** Marks a simulated unit next to its name, so it is never mistaken for a real one. */
+@Composable
+private fun DemoBadge() {
+    val c = LocalAirColors.current
+    Text(
+        stringResource(R.string.demo_badge),
+        color = c.muted,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .border(1.dp, c.line, RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
 @Composable
 private fun Hint(text: String) = Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp)
 
@@ -289,6 +306,7 @@ fun UnitScreen(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(displayName(state, unit), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (unit.stored.demo) DemoBadge()
                     Icon(
                         AirIcons.edit,
                         stringResource(R.string.rename),
@@ -408,6 +426,7 @@ fun ManageScreen(
     onDone: () -> Unit,
     onScan: () -> Unit,
     onAdd: (String, () -> Unit) -> Unit,
+    onDemo: () -> Unit,
     onRename: (String, String) -> Unit,
     onForget: (String) -> Unit,
 ) = Page {
@@ -429,7 +448,11 @@ fun ManageScreen(
             Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(displayName(state, u), fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Hint("${u.stored.host} · " + stringResource(if (u.online) R.string.online else R.string.unreachable))
+                    // A demo unit has no address; say what it is instead.
+                    Hint(
+                        (if (u.stored.demo) stringResource(R.string.demo_badge) else u.stored.host) + " · " +
+                            stringResource(if (u.online) R.string.online else R.string.unreachable),
+                    )
                 }
                 Pill(stringResource(R.string.rename), { renaming = u })
                 Spacer(Modifier.width(8.dp))
@@ -444,6 +467,14 @@ fun ManageScreen(
             filled = c.text,
             textColor = c.bg,
         )
+    }
+
+    if (state.units.none { it.stored.demo }) {
+        Card {
+            Heading(stringResource(R.string.demo_title))
+            Hint(stringResource(R.string.demo_hint))
+            Pill(stringResource(R.string.try_demo), onDemo, Modifier.padding(top = 12.dp))
+        }
     }
 
     Card {
@@ -477,7 +508,7 @@ fun ManageScreen(
         val name = displayName(state, u)
         AlertDialog(
             onDismissRequest = { forgetting = null },
-            text = { Text(stringResource(R.string.forget_confirm, name)) },
+            text = { Text(stringResource(if (u.stored.demo) R.string.forget_demo_confirm else R.string.forget_confirm, name)) },
             confirmButton = {
                 TextButton({ forgetting = null; onForget(u.stored.airconId) }) { Text(stringResource(R.string.forget), color = c.danger) }
             },

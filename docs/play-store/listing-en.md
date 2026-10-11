@@ -22,6 +22,8 @@ That is all, on purpose. AirLAN finds the air conditioners on your network by it
 
 The switch-off timer runs on your phone as an alarm, so it also works with the app closed and after a restart. If the air conditioner cannot be reached when the timer goes off, AirLAN keeps trying for ten minutes and tells you if it did not work.
 
+No air conditioner at hand? Tap "Try a demo unit" to try AirLAN with a simulated one, clearly marked as a demo, timer included.
+
 Good to know:
 • AirLAN works on your home network only. Away from home it cannot reach your air conditioners.
 • Your air conditioners must already be connected to Wi-Fi, for example with the Smart M-Air app.

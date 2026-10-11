@@ -29,7 +29,7 @@ developer's own account and identity; everything else is in this folder.
 |---|---|
 | Privacy policy | https://erdtsieck.github.io/airlan/privacy |
 | Ads | No ads |
-| App access | All functionality is available without special access. It needs a Mitsubishi Heavy Industries air conditioner with a WF-RAC module on the same network; without one the app shows the *Manage units* screen. Developers can run `node tools/fake-unit.mjs` from the repository as a stand-in. |
+| App access | All functionality is available without special access. The app controls Mitsubishi Heavy Industries air conditioners with a WF-RAC module on the same network. Without one, tap *Try a demo unit* on the *Manage units* screen (shown on first start when no unit is found): it adds a simulated air conditioner, marked *Demo*, with every function of a real one, including the switch-off timer. On Android 17 and newer, first allow *Nearby devices*. |
 | Content rating | Questionnaire category *Utility, productivity, communication or other*; answer No to everything. Expected: Everyone / PEGI 3. |
 | Target audience | 18 and over (the app is not designed for children) |
 | News app | No |
