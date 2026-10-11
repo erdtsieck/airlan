@@ -2,7 +2,7 @@
 
 ## App name (max 30)
 
-AirLAN – local AC control
+AirLAN – AC remote
 
 ## Short description (max 80)
 
