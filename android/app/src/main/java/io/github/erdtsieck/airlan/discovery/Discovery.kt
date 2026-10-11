@@ -1,8 +1,11 @@
 package io.github.erdtsieck.airlan.discovery
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
+import androidx.core.content.ContextCompat
 import io.github.erdtsieck.airlan.wfrac.WFRAC_PORT
 import java.net.Inet4Address
 import java.net.InetSocketAddress
@@ -40,6 +43,20 @@ fun hostsToScan(addresses: List<LocalAddress>): List<String> {
 }
 
 object Discovery {
+    // Android 17 (API 37) made the local network a runtime permission. Before that,
+    // INTERNET covers it and the permission does not exist. Android 16 only restricts the
+    // local network for apps opted in to the RESTRICT_LOCAL_NETWORK compat change, which
+    // is off by default whatever the target SDK; there NEARBY_WIFI_DEVICES (declared in
+    // the manifest so it can be granted in Settings) lifts it. Asking every Android 16
+    // user for it would block them on a prompt for access they already have.
+    private const val LOCAL_NETWORK_SDK = 37
+    const val LOCAL_NETWORK_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK"
+
+    /** Whether the app may talk to devices on the local network. Always on before Android 17. */
+    fun localNetworkAllowed(context: Context) =
+        Build.VERSION.SDK_INT < LOCAL_NETWORK_SDK ||
+            ContextCompat.checkSelfPermission(context, LOCAL_NETWORK_PERMISSION) == PackageManager.PERMISSION_GRANTED
+
     /** IPv4 addresses on the networks a unit could be on: Wi-Fi and Ethernet. */
     fun localAddresses(context: Context): List<LocalAddress> {
         val cm = context.getSystemService(ConnectivityManager::class.java)

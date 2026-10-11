@@ -227,6 +227,7 @@ private fun Heading(text: String) =
 @Composable
 fun UnitScreen(
     state: UiState,
+    permission: NetworkPermission,
     onSelect: (String) -> Unit,
     onManage: () -> Unit,
     onPower: (Boolean) -> Unit,
@@ -274,6 +275,7 @@ fun UnitScreen(
     }
 
     if (!state.onLocalNetwork) Card(accent = c.heat) { Hint(stringResource(R.string.home_network_only)) }
+    if (unit.needsPermission) NetworkPermissionCard(permission)
 
     if (unit.stored.name == null) {
         var name by remember(unit.stored.airconId) { mutableStateOf("") }
@@ -315,7 +317,7 @@ fun UnitScreen(
                         modifier = Modifier.padding(start = 4.dp).size(28.dp).clip(CircleShape).clickable { renaming = true }.padding(6.dp),
                     )
                 }
-                val climate = if (s == null) stringResource(R.string.unreachable)
+                val climate = if (s == null) stringResource(unit.availability)
                 else listOfNotNull(
                     when {
                         s.indoorTemp != null && s.outdoorTemp != null -> stringResource(R.string.climate, fmt(s.indoorTemp), fmt(s.outdoorTemp))
@@ -424,6 +426,7 @@ fun UnitScreen(
 @Composable
 fun ManageScreen(
     state: UiState,
+    permission: NetworkPermission,
     onDone: () -> Unit,
     onScan: () -> Unit,
     onAdd: (String, () -> Unit) -> Unit,
@@ -445,8 +448,11 @@ fun ManageScreen(
     }
 
     if (!state.onLocalNetwork) Card(accent = c.heat) { Hint(stringResource(R.string.home_network_only)) }
+    // Without the local network permission there is nothing to search or add by address;
+    // the units already known stay listed, and the demo unit works as ever.
+    if (!state.networkAllowed) NetworkPermissionCard(permission)
 
-    Card {
+    if (state.networkAllowed || state.units.isNotEmpty()) Card {
         if (state.units.isEmpty()) Hint(stringResource(R.string.no_units))
         state.units.forEachIndexed { i, u ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
@@ -456,7 +462,7 @@ fun ManageScreen(
                     // A demo unit has no address; say what it is instead.
                     Hint(
                         (if (u.stored.demo) stringResource(R.string.demo_badge) else u.stored.host) + " · " +
-                            stringResource(if (u.online) R.string.online else R.string.unreachable),
+                            stringResource(u.availability),
                     )
                 }
                 Pill(stringResource(R.string.rename), { renaming = u })
@@ -464,14 +470,16 @@ fun ManageScreen(
                 Pill(stringResource(R.string.forget), { forgetting = u }, textColor = c.danger)
             }
         }
-        Pill(
-            stringResource(R.string.search_network),
-            onScan,
-            Modifier.padding(top = 12.dp),
-            enabled = !state.scanning,
-            filled = c.text,
-            textColor = c.bg,
-        )
+        if (state.networkAllowed) {
+            Pill(
+                stringResource(R.string.search_network),
+                onScan,
+                Modifier.padding(top = 12.dp),
+                enabled = !state.scanning,
+                filled = c.text,
+                textColor = c.bg,
+            )
+        }
     }
 
     if (state.units.none { it.stored.demo }) {
@@ -482,7 +490,7 @@ fun ManageScreen(
         }
     }
 
-    Card {
+    if (state.networkAllowed) Card {
         var host by remember { mutableStateOf("") }
         Heading(stringResource(R.string.add_by_address))
         Hint(stringResource(R.string.add_by_address_hint))
@@ -552,17 +560,20 @@ fun ExactAlarmDialog(onAllow: () -> Unit, onSkip: () -> Unit) = AlertDialog(
     dismissButton = { TextButton(onSkip) { Text(stringResource(R.string.exact_alarm_skip)) } },
 )
 
+/** Asking for the local network permission: [denied] once the user said no to the prompt. */
+class NetworkPermission(val denied: Boolean, val onAllow: () -> Unit, val onSettings: () -> Unit)
+
+/** Shown where real units would be while the app may not use the local network (Android 17+). */
 @Composable
-fun PermissionScreen(denied: Boolean, onAllow: () -> Unit, onSettings: () -> Unit) = Page {
+private fun NetworkPermissionCard(permission: NetworkPermission) {
     val c = LocalAirColors.current
-    Spacer(Modifier.height(48.dp))
-    Card {
-        Text(stringResource(R.string.permission_title), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.padding(bottom = 12.dp))
-        Text(stringResource(R.string.permission_text), color = c.text)
-        if (denied) Text(stringResource(R.string.permission_denied), color = c.danger, fontSize = 14.sp, modifier = Modifier.padding(top = 12.dp))
-        Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Pill(stringResource(R.string.permission_allow), onAllow, filled = c.cool)
-            if (denied) Pill(stringResource(R.string.permission_settings), onSettings)
+    Card(accent = c.cool) {
+        Heading(stringResource(R.string.permission_title))
+        Hint(stringResource(R.string.permission_text))
+        if (permission.denied) Text(stringResource(R.string.permission_denied), color = c.danger, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill(stringResource(R.string.permission_allow), permission.onAllow, filled = c.cool)
+            if (permission.denied) Pill(stringResource(R.string.permission_settings), permission.onSettings)
         }
     }
 }

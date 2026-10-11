@@ -29,6 +29,9 @@ interface TimerScheduler {
 /** Nothing answers as a WF-RAC module at the address the user typed. */
 class NoUnitAtAddressException(host: String) : Exception("no WF-RAC module answers at $host")
 
+/** The user has not allowed the app on the local network (Android 17+), so real units are out of reach. */
+class LocalNetworkNotAllowedException : Exception("the local network permission is not granted")
+
 /**
  * Everything the app does with units: discovery, reading, writing and the off-timers.
  * Shared by the UI and the timer receiver, so there is one client (and one request queue)
@@ -42,8 +45,22 @@ class Repository(
     private val clientIntervalMs: Long = 1100,
     private val timezone: () -> String = { TimeZone.getDefault().id },
     private val now: () -> Long = System::currentTimeMillis,
+    private val localNetworkAllowed: () -> Boolean = { true },
 ) {
     val units get() = store.state
+
+    /** Whether real units can be reached at all: the user allowed the app on the local network. */
+    val networkAllowed get() = localNetworkAllowed()
+
+    /**
+     * Whether [unit] waits for the local network permission. Real units are not scanned or
+     * contacted without it (connections would only time out); the demo unit needs no network.
+     */
+    fun needsNetworkPermission(unit: StoredUnit) = !unit.demo && !networkAllowed
+
+    private fun requireNetwork() {
+        if (!networkAllowed) throw LocalNetworkNotAllowedException()
+    }
 
     /** A client together with the address it was made for, so a unit that moved gets a new one. */
     private class Connection(val host: String, val client: AirconClient)
@@ -70,7 +87,9 @@ class Repository(
 
     /** Runs [block] against a unit; on a network failure, rescans (at most once a minute) and retries. */
     private suspend fun <T> withUnit(airconId: String, block: suspend (AirconClient) -> T): T {
-        val client = clientFor(require(airconId))
+        val unit = require(airconId)
+        if (needsNetworkPermission(unit)) throw LocalNetworkNotAllowedException()
+        val client = clientFor(unit)
         try {
             return block(client)
         } catch (e: IOException) {
@@ -110,6 +129,7 @@ class Repository(
 
     /** Adds the module at [host], or updates the address of a known one. New units have no name. */
     suspend fun adopt(host: String): StoredUnit {
+        requireNetwork()
         val ids = store.state.value
         val probe = WfRacClient(host, ids.deviceId, ids.operatorId, port = port, minIntervalMs = clientIntervalMs)
         val airconId = try {
@@ -131,6 +151,7 @@ class Repository(
 
     /** Scans the local network for units. Returns the number of units it found. */
     suspend fun scan(): Int = scanMutex.withLock {
+        requireNetwork()
         var found = 0
         for (host in Discovery.findOpen(hostsToScan(localAddresses()), port)) {
             try {

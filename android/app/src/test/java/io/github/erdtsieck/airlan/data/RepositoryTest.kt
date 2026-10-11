@@ -73,8 +73,12 @@ class RepositoryTest {
     private val timers = RecordingTimers()
     private var clock = 1_000_000L
 
-    private fun repository(port: Int = unit.port) =
-        Repository(UnitStore(File(dir, "state.json")), timers, { emptyList() }, port, clientIntervalMs = 0, timezone = { "Europe/Amsterdam" }, now = { clock })
+    private var networkAllowed = true
+
+    private fun repository(port: Int = unit.port) = Repository(
+        UnitStore(File(dir, "state.json")), timers, { emptyList() }, port,
+        clientIntervalMs = 0, timezone = { "Europe/Amsterdam" }, now = { clock }, localNetworkAllowed = { networkAllowed },
+    )
 
     @After
     fun cleanUp() {
@@ -295,6 +299,34 @@ class RepositoryTest {
 
         repo.addDemo("Demo unit")
         assertFalse(repo.state(id).power)
+    }
+
+    @Test
+    fun `without the local network permission real units are left alone and the demo works`() = runBlocking {
+        repository().add("127.0.0.1")
+        unit.commands.clear()
+        networkAllowed = false
+        val repo = repository()
+
+        assertTrue(repo.needsNetworkPermission(repo.units.value.units.single()))
+        for (action in listOf<suspend () -> Unit>(
+            { repo.state(ID) },
+            { repo.apply(ID) { it.copy(power = true) } },
+            { repo.scan() },
+            { repo.add("127.0.0.1") },
+        )) {
+            assertTrue(runCatching { action() }.exceptionOrNull() is LocalNetworkNotAllowedException)
+        }
+        assertEquals(emptyList<String>(), unit.commands)
+
+        val demo = repo.addDemo("Demo unit")
+        assertFalse(repo.needsNetworkPermission(demo))
+        assertTrue(repo.apply(demo.airconId) { it.copy(power = true) }.power)
+
+        networkAllowed = true
+        assertFalse(repo.needsNetworkPermission(repo.units.value.units.first()))
+        repo.state(ID)
+        assertEquals(listOf("getAirconStat"), unit.commands)
     }
 
     @Test(expected = NoUnitAtAddressException::class)

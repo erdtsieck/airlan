@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -25,6 +26,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import io.github.erdtsieck.airlan.discovery.Discovery
 import io.github.erdtsieck.airlan.timer.AlarmTimerScheduler
 import kotlinx.coroutines.delay
 
@@ -36,45 +38,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             AirLanTheme {
-                var granted by remember { mutableStateOf(localNetworkGranted()) }
-                var askedOnce by remember { mutableStateOf(false) }
-                val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-                    granted = it
-                    askedOnce = true
-                }
-                LifecycleResumeEffect(Unit) {
-                    granted = localNetworkGranted()
-                    onPauseOrDispose {}
-                }
-                if (!granted) {
-                    PermissionScreen(
-                        denied = askedOnce,
-                        onAllow = { request.launch(LOCAL_NETWORK) },
-                        onSettings = { openAppSettings() },
-                    )
-                } else {
-                    App(vm)
-                }
+                App(vm)
             }
         }
-    }
-
-    private fun localNetworkGranted() =
-        Build.VERSION.SDK_INT < LOCAL_NETWORK_SDK ||
-            ContextCompat.checkSelfPermission(this, LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED
-
-    private fun openAppSettings() =
-        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
-
-    companion object {
-        // Android 17 (API 37) made the local network a runtime permission. Before that,
-        // INTERNET covers it and the permission does not exist. Android 16 only restricts the
-        // local network for apps opted in to the RESTRICT_LOCAL_NETWORK compat change, which
-        // is off by default whatever the target SDK; there NEARBY_WIFI_DEVICES (declared in
-        // the manifest so it can be granted in Settings) lifts it. Asking every Android 16
-        // user for it would block them on a prompt for access they already have.
-        private const val LOCAL_NETWORK_SDK = 37
-        private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 }
 
@@ -83,6 +49,26 @@ private fun App(vm: MainViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // The local network permission (Android 17+) gates real units only; the app itself, and
+    // the demo unit, work without it. The ViewModel knows whether it is granted (see
+    // Discovery.localNetworkAllowed); this only asks for it and notices when it changes.
+    var askedOnce by rememberSaveable { mutableStateOf(false) }
+    val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        askedOnce = true
+        vm.networkPermissionChanged()
+    }
+    LifecycleResumeEffect(Unit) {
+        vm.networkPermissionChanged()
+        onPauseOrDispose {}
+    }
+    val permission = NetworkPermission(
+        denied = askedOnce,
+        onAllow = { request.launch(Discovery.LOCAL_NETWORK_PERMISSION) },
+        onSettings = {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+        },
+    )
 
     LaunchedEffect(Unit) { vm.scanIfEmpty() }
     LaunchedEffect(lifecycle) {
@@ -128,6 +114,7 @@ private fun App(vm: MainViewModel) {
     when {
         state.screen == Screen.MANAGE || (state.loaded && state.units.isEmpty()) -> ManageScreen(
             state = state,
+            permission = permission,
             onDone = { vm.showManage(false) },
             onScan = vm::scan,
             onAdd = vm::add,
@@ -137,6 +124,7 @@ private fun App(vm: MainViewModel) {
         )
         else -> UnitScreen(
             state = state,
+            permission = permission,
             onSelect = vm::select,
             onManage = { vm.showManage(true) },
             onPower = vm::setPower,
