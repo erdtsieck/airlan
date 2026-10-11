@@ -28,7 +28,10 @@ restart, retries for ten minutes if the unit cannot be reached and then notifies
 phone has to be on the home network when the timer fires.
 
 On Android 17 and newer the app asks for the *Nearby devices* permission, which Android
-requires for talking to devices on the local network.
+requires for talking to devices on the local network. Older versions need no permission
+for that. Android 16 has an opt-in test mode for this protection (the compatibility change
+`RESTRICT_LOCAL_NETWORK`, off unless enabled with `adb`); with it enabled, allow *Nearby
+devices* for AirLAN in the app's permission settings.
 
 Build it with Android Studio, or from the command line with JDK 21 and the Android SDK:
 

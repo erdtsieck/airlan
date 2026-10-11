@@ -68,7 +68,11 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         // Android 17 (API 37) made the local network a runtime permission. Before that,
-        // INTERNET covers it and the permission does not exist.
+        // INTERNET covers it and the permission does not exist. Android 16 only restricts the
+        // local network for apps opted in to the RESTRICT_LOCAL_NETWORK compat change, which
+        // is off by default whatever the target SDK; there NEARBY_WIFI_DEVICES (declared in
+        // the manifest so it can be granted in Settings) lifts it. Asking every Android 16
+        // user for it would block them on a prompt for access they already have.
         private const val LOCAL_NETWORK_SDK = 37
         private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
