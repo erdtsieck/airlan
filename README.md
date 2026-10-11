@@ -35,7 +35,9 @@ starts afresh (off, cooling, 21 °C) whenever the app's process starts; the unit
 until you forget it. Network scans never find or touch it.
 
 On Android 17 and newer the app asks for the *Nearby devices* permission, which Android
-requires for talking to devices on the local network. Older versions need no permission
+requires for talking to devices on the local network. Without it the app still opens
+and the demo unit works; real units are not searched or contacted until it is allowed
+(the *Allow* button on the *Manage units* screen). Older versions need no permission
 for that. Android 16 has an opt-in test mode for this protection (the compatibility change
 `RESTRICT_LOCAL_NETWORK`, off unless enabled with `adb`); with it enabled, allow *Nearby
 devices* for AirLAN in the app's permission settings.

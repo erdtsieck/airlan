@@ -6,6 +6,7 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.erdtsieck.airlan.R
+import io.github.erdtsieck.airlan.data.LocalNetworkNotAllowedException
 import io.github.erdtsieck.airlan.data.NoUnitAtAddressException
 import io.github.erdtsieck.airlan.data.StoredUnit
 import io.github.erdtsieck.airlan.discovery.Discovery
@@ -26,9 +27,20 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** A unit as shown: what is stored about it, plus its last known live state or why it is missing. */
-data class UnitUi(val stored: StoredUnit, val state: AirconState?, @StringRes val error: Int?) {
+/**
+ * A unit as shown: what is stored about it, plus its last known live state or why it is missing.
+ * A unit that [needsPermission] is not contacted at all, so it has neither state nor error.
+ */
+data class UnitUi(val stored: StoredUnit, val state: AirconState?, @StringRes val error: Int?, val needsPermission: Boolean = false) {
     val online get() = state != null
+
+    /** One word for where the unit stands. */
+    @get:StringRes
+    val availability get() = when {
+        online -> R.string.online
+        needsPermission -> R.string.needs_permission
+        else -> R.string.unreachable
+    }
 }
 
 enum class Screen { UNIT, MANAGE }
@@ -45,6 +57,8 @@ data class UiState(
     val scanning: Boolean = false,
     val pendingTemp: Double? = null,
     val onLocalNetwork: Boolean = true,
+    /** The user allowed the app on the local network (always so before Android 17). */
+    val networkAllowed: Boolean = true,
     val status: Status? = null,
 ) {
     val selected get() = units.firstOrNull { it.stored.airconId == selectedId } ?: units.firstOrNull()
@@ -56,17 +70,18 @@ data class UiState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = app.repository
     private val live = MutableStateFlow<Map<String, Result<AirconState>>>(emptyMap())
-    private val ui = MutableStateFlow(UiState())
+    private val ui = MutableStateFlow(UiState(networkAllowed = repo.networkAllowed))
     private var tempJob: Job? = null
 
     val state: StateFlow<UiState> = combine(repo.units, live, ui) { store, states, u ->
         u.copy(
             units = store.units.map { s ->
-                val r = states[s.airconId]
-                UnitUi(s, r?.getOrNull(), r?.exceptionOrNull()?.let(::errorText))
+                val blocked = repo.needsNetworkPermission(s)
+                val r = states[s.airconId].takeUnless { blocked }
+                UnitUi(s, r?.getOrNull(), r?.exceptionOrNull()?.let(::errorText), needsPermission = blocked)
             },
         )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, UiState())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ui.value)
 
     private val app get() = getApplication<Application>()
 
@@ -84,9 +99,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         ui.update { it.copy(loaded = true) }
     }
 
-    /** First start: find the units without being asked. */
+    /** First start: find the units without being asked, once the app may use the network. */
     fun scanIfEmpty() {
-        if (repo.units.value.units.isEmpty() && !ui.value.scanning) scan()
+        if (repo.units.value.units.isEmpty() && !ui.value.scanning && repo.networkAllowed) scan()
+    }
+
+    /**
+     * The local network permission may have changed (asked for, or changed in Settings). When it
+     * is newly granted, look for units at once: search if there are no real ones yet.
+     */
+    fun networkPermissionChanged() {
+        val allowed = repo.networkAllowed
+        if (allowed == ui.value.networkAllowed) return
+        ui.update { it.copy(networkAllowed = allowed) }
+        if (!allowed) return
+        if (repo.units.value.units.all { it.demo }) {
+            if (!ui.value.scanning) scan()
+        } else {
+            viewModelScope.launch { refresh() }
+        }
     }
 
     fun scan() = viewModelScope.launch {
@@ -196,6 +227,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         @StringRes
         fun errorText(e: Throwable): Int = when (e) {
             is NoUnitAtAddressException -> R.string.error_no_unit_at_address
+            is LocalNetworkNotAllowedException -> R.string.permission_denied
             is WfRacException -> if (e.code == "unit_refused") R.string.error_unit_refused else R.string.error_bad_response
             is IllegalArgumentException -> R.string.error_invalid
             is IOException -> R.string.error_unreachable

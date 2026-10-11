@@ -11,6 +11,7 @@
     <string name="climate_indoor">Indoor %1$s°</string>
     <string name="fault">fault %1$s</string>
     <string name="unreachable">Unreachable</string>
+    <string name="needs_permission">Needs permission</string>
     <string name="set">set</string>
     <string name="off">off</string>
     <string name="colder">Colder</string>

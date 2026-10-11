@@ -19,6 +19,7 @@ class AirLanApp : Application() {
             store = UnitStore(File(filesDir, "state.json")),
             timers = AlarmTimerScheduler(this),
             localAddresses = { Discovery.localAddresses(this) },
+            localNetworkAllowed = { Discovery.localNetworkAllowed(this) },
         )
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(TIMER_CHANNEL, getString(R.string.channel_timer), NotificationManager.IMPORTANCE_DEFAULT),

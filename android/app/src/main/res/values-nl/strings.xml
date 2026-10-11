@@ -10,6 +10,7 @@
     <string name="climate_indoor">Binnen %1$s°</string>
     <string name="fault">storing %1$s</string>
     <string name="unreachable">Niet bereikbaar</string>
+    <string name="needs_permission">Toestemming nodig</string>
     <string name="set">ingesteld</string>
     <string name="off">uit</string>
     <string name="colder">Kouder</string>
