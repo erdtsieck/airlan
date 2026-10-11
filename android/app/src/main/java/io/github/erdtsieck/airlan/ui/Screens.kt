@@ -1,5 +1,6 @@
 package io.github.erdtsieck.airlan.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -433,6 +434,10 @@ fun ManageScreen(
     val c = LocalAirColors.current
     var renaming by remember { mutableStateOf<UnitUi?>(null) }
     var forgetting by remember { mutableStateOf<UnitUi?>(null) }
+
+    // Back returns to the unit screen, like Done. Without units this is the home screen, and
+    // back leaves the app. The dialogs below are windows of their own and handle back first.
+    BackHandler(enabled = state.units.isNotEmpty(), onBack = onDone)
 
     Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.manage), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f))
