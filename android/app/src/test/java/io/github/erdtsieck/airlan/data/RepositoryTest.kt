@@ -165,6 +165,65 @@ class RepositoryTest {
         for (bad in listOf("", "256.1.1.1", "1.2.3", "example.com", "1.2.3.4.5")) assertFalse(bad, Repository.isIpv4(bad))
     }
 
+    @Test
+    fun `the demo unit is stored with its marker and survives a restart`() = runBlocking {
+        val demo = repository().addDemo("Demo unit")
+        assertEquals(StoredUnit(Repository.DEMO_AIRCON_ID, "Demo unit", host = demo.host, demo = true), demo)
+        assertEquals(demo, repository().addDemo("Another name"))
+        assertEquals(listOf(demo), repository().units.value.units)
+        assertEquals(true, JSONObject(File(dir, "state.json").readText()).getJSONArray("units").getJSONObject(0).getBoolean("demo"))
+    }
+
+    @Test
+    fun `state files from before the demo unit load as real units`() {
+        File(dir, "state.json").writeText(
+            """{"deviceId": "airlan-1", "operatorId": "op", "units": [{"airconId": "e81656cb0d45", "name": "Woonkamer", "host": "127.0.0.1", "scheme": "HTTP"}]}""",
+        )
+        assertEquals(StoredUnit("e81656cb0d45", "Woonkamer", "127.0.0.1", Scheme.HTTP), repository().units.value.units.single())
+    }
+
+    @Test
+    fun `the demo unit is operated like a real one, timer included`() = runBlocking {
+        val repo = repository()
+        val id = repo.addDemo("Demo unit").airconId
+        val on = repo.apply(id) { it.copy(power = true, mode = Mode.HEAT, presetTemp = 24.0) }
+        assertTrue(on.power)
+        assertEquals(on, repo.state(id))
+
+        repo.setTimer(id, 30)
+        assertEquals(Triple(id, clock + 30 * 60_000L, 0), timers.scheduled.last())
+        clock += 30 * 60_000L
+        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer(id, 0))
+        assertFalse(repo.state(id).power)
+        assertEquals(Mode.HEAT, repo.state(id).mode)
+        assertNull(repo.units.value.units.single().offAt)
+    }
+
+    @Test
+    fun `scans never find the demo unit and leave it alone`() = runBlocking {
+        val repo = repository()
+        val demo = repo.addDemo("Demo unit")
+        repo.add("127.0.0.1")
+        assertEquals(0, repo.scan())
+        assertEquals(listOf(demo.airconId, "e81656cb0d45"), repo.units.value.units.map { it.airconId })
+        assertEquals(demo, repo.units.value.units.first())
+        assertFalse(unit.commands.isEmpty())
+    }
+
+    @Test
+    fun `forgetting the demo unit removes it and its timer, and a new one starts afresh`() = runBlocking {
+        val repo = repository()
+        val id = repo.addDemo("Demo unit").airconId
+        repo.apply(id) { it.copy(power = true) }
+        repo.setTimer(id, 60)
+        repo.forget(id)
+        assertTrue(repo.units.value.units.isEmpty())
+        assertEquals(listOf(id), timers.cancelled)
+
+        repo.addDemo("Demo unit")
+        assertFalse(repo.state(id).power)
+    }
+
     @Test(expected = NoUnitAtAddressException::class)
     fun `adding an address where no unit answers fails clearly`(): Unit = runBlocking {
         val closedPort = ServerSocket(0).use { it.localPort }

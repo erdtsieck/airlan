@@ -48,6 +48,12 @@
     <string name="forget">Vergeten</string>
     <string name="forget_confirm">%1$s vergeten? Je kunt hem later terugvinden door te zoeken.</string>
     <string name="online">online</string>
+    <string name="demo_title">Geen airco bij de hand?</string>
+    <string name="demo_hint">Probeer AirLAN met een gesimuleerde airco. Die werkt als een echte, timer inbegrepen, en je kunt hem altijd weer vergeten.</string>
+    <string name="try_demo">Probeer een demo-airco</string>
+    <string name="demo_unit_name">Demo-airco</string>
+    <string name="demo_badge">Demo</string>
+    <string name="forget_demo_confirm">%1$s vergeten? Je kunt de demo-airco altijd opnieuw toevoegen.</string>
     <string name="home_network_only">AirLAN werkt alleen op je thuisnetwerk. Maak verbinding met de wifi waarop je airco’s zitten.</string>
     <string name="permission_title">Toegang tot je thuisnetwerk</string>
     <string name="permission_text">AirLAN praat rechtstreeks met je airco’s via je thuisnetwerk, zonder cloud. Android vraagt je dat toe te staan als “Apparaten in de buurt”.</string>

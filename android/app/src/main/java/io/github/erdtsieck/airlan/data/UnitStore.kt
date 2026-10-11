@@ -11,7 +11,10 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** A unit the user has (or the scan has) added. [name] is null until the user names it. */
+/**
+ * A unit the user has (or the scan has) added. [name] is null until the user names it.
+ * A [demo] unit is simulated in the app instead of reached at [host]; see [Repository.addDemo].
+ */
 data class StoredUnit(
     val airconId: String,
     val name: String?,
@@ -20,6 +23,7 @@ data class StoredUnit(
     val certificatePin: String? = null,
     /** Epoch millis at which the unit should switch off, if a timer is set. */
     val offAt: Long? = null,
+    val demo: Boolean = false,
 )
 
 data class StoreState(val deviceId: String, val operatorId: String, val units: List<StoredUnit>)
@@ -60,6 +64,7 @@ class UnitStore(private val file: File) {
                     scheme = u.optString("scheme").takeIf { it.isNotEmpty() }?.let(Scheme::valueOf),
                     certificatePin = u.optString("certificatePin").takeIf { it.isNotEmpty() },
                     offAt = if (u.has("offAt")) u.getLong("offAt") else null,
+                    demo = u.optBoolean("demo", false),
                 )
             },
         )
@@ -81,6 +86,7 @@ class UnitStore(private val file: File) {
                                 u.scheme?.let { put("scheme", it.name) }
                                 u.certificatePin?.let { put("certificatePin", it) }
                                 u.offAt?.let { put("offAt", it) }
+                                if (u.demo) put("demo", true)
                             }
                     },
                 ),

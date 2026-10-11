@@ -27,6 +27,13 @@ switch-off timer as an alarm on the phone: it fires with the app closed, survive
 restart, retries for ten minutes if the unit cannot be reached and then notifies you. The
 phone has to be on the home network when the timer fires.
 
+No air conditioner at hand? *Try a demo unit* (on the *Manage units* screen) adds a
+simulated unit, marked *Demo*, that works like a real one: power, cooling or heating,
+temperature, and the switch-off timer as a real alarm. It reports an indoor temperature
+that moves towards the set temperature while it runs. Its state is kept in memory only and
+starts afresh (off, cooling, 21 °C) whenever the app's process starts; the unit itself stays
+until you forget it. Network scans never find or touch it.
+
 On Android 17 and newer the app asks for the *Nearby devices* permission, which Android
 requires for talking to devices on the local network.
 

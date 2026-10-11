@@ -22,6 +22,8 @@ Meer niet, en dat is expres. AirLAN vindt de airco's op je netwerk zelf en vraag
 
 De uitschakeltimer draait als wekker op je telefoon, dus hij werkt ook als de app dicht is en na een herstart. Is de airco niet bereikbaar als de timer afgaat, dan blijft AirLAN het tien minuten proberen en laat het je weten als het niet lukte.
 
+Geen airco bij de hand? Tik op "Probeer een demo-airco" om AirLAN te proberen met een gesimuleerde airco, duidelijk gemarkeerd als demo, timer inbegrepen.
+
 Goed om te weten:
 • AirLAN werkt alleen op je thuisnetwerk. Buitenshuis kan de app je airco's niet bereiken.
 • Je airco's moeten al met wifi verbonden zijn, bijvoorbeeld via de Smart M-Air-app.
