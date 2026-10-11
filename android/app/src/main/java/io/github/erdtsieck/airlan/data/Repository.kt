@@ -17,9 +17,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withLock
 
-/** Schedules the moment a unit's off-timer fires. Backed by AlarmManager on the device. */
+/**
+ * Schedules the moment a unit's off-timer fires. Backed by AlarmManager on the device. It
+ * carries no state of its own: what to do when it fires is read from the stored [OffTimer].
+ */
 interface TimerScheduler {
-    fun schedule(airconId: String, atMillis: Long, attempt: Int = 0)
+    fun schedule(airconId: String, atMillis: Long)
     fun cancel(airconId: String)
 }
 
@@ -48,6 +51,7 @@ class Repository(
     private val clients = ConcurrentHashMap<String, Connection>()
     private val registered = ConcurrentHashMap.newKeySet<String>()
     private val scanMutex = Mutex()
+    private val firing = ConcurrentHashMap<String, Mutex>()
     private var lastScan = 0L
 
     private fun clientFor(unit: StoredUnit): AirconClient =
@@ -173,15 +177,15 @@ class Repository(
 
     suspend fun setTimer(airconId: String, minutes: Int) {
         require(minutes in 1..MAX_TIMER_MINUTES) { "minutes must be between 1 and $MAX_TIMER_MINUTES" }
-        val at = now() + minutes * 60_000L
-        store.updateUnit(airconId) { it.copy(offAt = at) }
-        timers.schedule(airconId, at)
+        val timer = OffTimer(at = now() + minutes * 60_000L)
+        store.updateUnit(airconId) { it.copy(timer = timer) }
+        timers.schedule(airconId, timer.dueAt)
     }
 
     suspend fun cancelTimer(airconId: String) {
-        if (store.unit(airconId)?.offAt == null) return
+        if (store.unit(airconId)?.timer == null) return
         timers.cancel(airconId)
-        store.updateUnit(airconId) { it.copy(offAt = null) }
+        store.updateUnit(airconId) { it.copy(timer = null) }
     }
 
     sealed interface TimerOutcome {
@@ -192,36 +196,58 @@ class Repository(
     }
 
     /**
-     * Called when a unit's alarm goes off. Switches it off, or schedules a retry: the unit may
-     * be briefly unreachable, or another client may hold its 60-second write lock.
+     * Called when a unit's alarm goes off. Switches it off, or records the failure and schedules
+     * a retry: the unit may be briefly unreachable, or another client may hold its 60-second
+     * write lock. The attempt count lives in the stored [OffTimer], so it survives the process
+     * and [rescheduleAll]; after [TIMER_ATTEMPTS] failed attempts the timer is given up.
+     *
+     * An alarm can go off more than once for the same attempt (see [rescheduleAll]), so firings
+     * for one unit take turns, and each one works from the stored timer as it finds it.
      */
-    suspend fun fireTimer(airconId: String, attempt: Int): TimerOutcome {
-        val unit = store.unit(airconId) ?: return TimerOutcome.NotDue
-        val offAt = unit.offAt ?: return TimerOutcome.NotDue
-        if (offAt > now() + 1000) {
-            timers.schedule(airconId, offAt) // Rescheduled since this alarm was set.
-            return TimerOutcome.NotDue
+    suspend fun fireTimer(airconId: String): TimerOutcome = firing.computeIfAbsent(airconId) { Mutex() }.withLock {
+        val timer = store.unit(airconId)?.timer ?: return@withLock TimerOutcome.NotDue
+        if (timer.dueAt > now() + 1000) {
+            timers.schedule(airconId, timer.dueAt) // Rescheduled since this alarm was set.
+            return@withLock TimerOutcome.NotDue
         }
-        return try {
+        try {
             // Runs inside a broadcast receiver, which Android gives about a minute. An
             // unreachable unit costs a timeout per transport plus a rescan, so bound the attempt.
+            // Switching off clears the timer (see apply).
             withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId) { it.copy(power = false) } }
-            store.updateUnit(airconId) { it.copy(offAt = null) }
             TimerOutcome.SwitchedOff
         } catch (e: Exception) {
-            if (attempt + 1 < TIMER_ATTEMPTS) {
-                timers.schedule(airconId, now() + TIMER_RETRY_MS, attempt + 1)
-                TimerOutcome.Retrying(attempt + 1)
-            } else {
-                store.updateUnit(airconId) { it.copy(offAt = null) }
-                TimerOutcome.GaveUp(e)
+            val failed = timer.failedAttempts + 1
+            val next = if (failed < TIMER_ATTEMPTS) timer.copy(failedAttempts = failed, retryAt = now() + TIMER_RETRY_MS) else null
+            // The user may have cancelled or replaced the timer meanwhile; leave theirs alone.
+            var replaced = false
+            store.updateUnit(airconId) { u ->
+                if (u.timer != timer) return@updateUnit u
+                replaced = true
+                u.copy(timer = next)
+            }
+            when {
+                !replaced -> TimerOutcome.NotDue
+                next != null -> {
+                    timers.schedule(airconId, next.dueAt)
+                    TimerOutcome.Retrying(failed)
+                }
+                else -> {
+                    timers.cancel(airconId)
+                    TimerOutcome.GaveUp(e)
+                }
             }
         }
     }
 
-    /** After a reboot or update, alarms are gone: set them again. Overdue ones fire right away. */
+    /**
+     * Sets every unit's alarm from its stored timer. Android drops alarms on a reboot, an update
+     * and, without telling the app, when the user revokes the exact-alarm permission; so this
+     * runs whenever the process starts. Overdue ones fire right away; a pending retry keeps its
+     * attempt count.
+     */
     fun rescheduleAll() {
-        for (u in store.state.value.units) u.offAt?.let { timers.schedule(u.airconId, it) }
+        for (u in store.state.value.units) u.timer?.let { timers.schedule(u.airconId, it.dueAt) }
     }
 
     companion object {

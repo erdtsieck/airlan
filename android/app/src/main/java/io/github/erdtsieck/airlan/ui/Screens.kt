@@ -365,7 +365,7 @@ fun UnitScreen(
 
     Card {
         Heading(stringResource(R.string.auto_off))
-        val offAt = unit.stored.offAt
+        val offAt = unit.stored.timer?.at
         when {
             offAt != null -> {
                 var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
