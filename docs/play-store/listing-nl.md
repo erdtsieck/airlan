@@ -2,7 +2,7 @@
 
 ## App name (max 30)
 
-AirLAN – airco lokaal bedienen
+AirLAN – airco bediening
 
 ## Short description (max 80)
 

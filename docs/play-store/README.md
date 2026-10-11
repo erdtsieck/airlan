@@ -19,7 +19,7 @@ developer's own account and identity; everything else is in this folder.
 
 ## 2. Create the app
 
-- App name: *AirLAN – local AC control*; default language English (United States).
+- App name: *AirLAN – AC remote*; package name `io.github.erdtsieck.airlan` (must match `applicationId`, cannot change later); default language English (United States).
 - App or game: App. Free or paid: Free.
 - Accept the declarations.
 
