@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -23,37 +24,47 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Off-timers as alarms, so they fire with the app closed and the phone asleep. Exact when the
- * user allows it; otherwise Android may deliver the alarm some minutes late.
+ * Off-timers as alarms, so they fire with the app closed and the phone asleep.
+ *
+ * Every timer gets an inexact alarm, which needs no permission, and on top of that an exact
+ * one when the user allows exact alarms. Revoking that permission makes Android delete the
+ * app's exact alarms (and kill it) without telling it; the inexact alarm survives and still
+ * switches the unit off, if possibly some minutes late. Whichever goes off first does the
+ * work; [io.github.erdtsieck.airlan.data.Repository.fireTimer] makes the other a no-op.
  */
 class AlarmTimerScheduler(private val context: Context) : TimerScheduler {
     private val alarms = context.getSystemService(AlarmManager::class.java)
 
-    private fun intent(airconId: String, attempt: Int = 0): PendingIntent = PendingIntent.getBroadcast(
+    /** One PendingIntent per unit and kind, told apart by their data URI. */
+    private fun intent(airconId: String, kind: String): PendingIntent = PendingIntent.getBroadcast(
         context,
-        airconId.hashCode(),
+        0,
         Intent(context, OffTimerReceiver::class.java)
             .setAction(ACTION_FIRE)
-            .putExtra(EXTRA_AIRCON_ID, airconId)
-            .putExtra(EXTRA_ATTEMPT, attempt),
+            .setData(Uri.Builder().scheme("airlan").authority("timer").appendPath(airconId).appendPath(kind).build())
+            .putExtra(EXTRA_AIRCON_ID, airconId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    override fun schedule(airconId: String, atMillis: Long, attempt: Int) {
-        val pending = intent(airconId, attempt)
+    override fun schedule(airconId: String, atMillis: Long) {
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, intent(airconId, INEXACT))
         if (canScheduleExact(context)) {
-            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, intent(airconId, EXACT))
         } else {
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
+            alarms.cancel(intent(airconId, EXACT))
         }
     }
 
-    override fun cancel(airconId: String) = alarms.cancel(intent(airconId))
+    override fun cancel(airconId: String) {
+        alarms.cancel(intent(airconId, EXACT))
+        alarms.cancel(intent(airconId, INEXACT))
+    }
 
     companion object {
         const val ACTION_FIRE = "io.github.erdtsieck.airlan.action.FIRE_TIMER"
         const val EXTRA_AIRCON_ID = "airconId"
-        const val EXTRA_ATTEMPT = "attempt"
+        private const val EXACT = "exact"
+        private const val INEXACT = "inexact"
 
         fun canScheduleExact(context: Context) =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S || context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
@@ -67,11 +78,10 @@ class OffTimerReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != AlarmTimerScheduler.ACTION_FIRE) return
         val airconId = intent.getStringExtra(AlarmTimerScheduler.EXTRA_AIRCON_ID) ?: return
-        val attempt = intent.getIntExtra(AlarmTimerScheduler.EXTRA_ATTEMPT, 0)
         val pending = goAsync()
         receiverScope.launch {
             try {
-                val outcome = context.repository.fireTimer(airconId, attempt)
+                val outcome = context.repository.fireTimer(airconId)
                 if (outcome is TimerOutcome.GaveUp) notifyFailure(context, airconId)
             } finally {
                 pending.finish()
@@ -102,7 +112,11 @@ class OffTimerReceiver : BroadcastReceiver() {
     }
 }
 
-/** Alarms do not survive a reboot or an app update; exact alarms also change with the permission. */
+/**
+ * Alarms do not survive a reboot or an app update. These broadcasts start the process, which
+ * sets the alarms again (see AirLanApp); a granted exact-alarm permission can also arrive while
+ * the process runs, and then upgrades the alarms to exact ones.
+ */
 class RescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {

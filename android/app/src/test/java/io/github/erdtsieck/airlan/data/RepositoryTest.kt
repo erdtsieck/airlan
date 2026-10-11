@@ -20,6 +20,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val ID = "e81656cb0d45"
+
 class RepositoryTest {
     private val fixtures = File(System.getProperty("airlan.fixtures") ?: error("airlan.fixtures not set"))
     private val liveFrame = JSONObject(File(fixtures, "live-frames.json").readText())
@@ -60,9 +62,9 @@ class RepositoryTest {
     }
 
     private class RecordingTimers : TimerScheduler {
-        val scheduled = mutableListOf<Triple<String, Long, Int>>()
+        val scheduled = mutableListOf<Pair<String, Long>>()
         val cancelled = mutableListOf<String>()
-        override fun schedule(airconId: String, atMillis: Long, attempt: Int) { scheduled += Triple(airconId, atMillis, attempt) }
+        override fun schedule(airconId: String, atMillis: Long) { scheduled += airconId to atMillis }
         override fun cancel(airconId: String) { cancelled += airconId }
     }
 
@@ -112,9 +114,9 @@ class RepositoryTest {
         assertEquals(clock + 30 * 60_000L, timers.scheduled.last().second)
 
         clock += 30 * 60_000L
-        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer("e81656cb0d45", 0))
+        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer("e81656cb0d45"))
         assertFalse(unit.state.power)
-        assertNull(repository().units.value.units.single().offAt)
+        assertNull(repository().units.value.units.single().timer)
     }
 
     @Test
@@ -122,25 +124,96 @@ class RepositoryTest {
         val repo = repository()
         repo.add("127.0.0.1")
         repo.setTimer("e81656cb0d45", 60)
-        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer("e81656cb0d45", 0))
+        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer("e81656cb0d45"))
         assertEquals(2, timers.scheduled.size)
     }
 
-    @Test
-    fun `an unreachable unit is retried every 30 seconds, then given up`() = runBlocking {
+    /** A one-minute timer on the fake unit, now due, with the unit gone. Returns when it was due. */
+    private suspend fun dueTimerOnUnreachableUnit(): Long {
         val repo = repository()
         repo.add("127.0.0.1")
-        repo.setTimer("e81656cb0d45", 1)
+        repo.setTimer(ID, 1)
         unit.close()
         clock += 60_000L
+        return clock
+    }
 
-        val first = repo.fireTimer("e81656cb0d45", 0)
-        assertEquals(Repository.TimerOutcome.Retrying(1), first)
-        assertEquals(Triple("e81656cb0d45", clock + 30_000L, 1), timers.scheduled.last())
+    private fun storedTimer() = repository().units.value.units.single().timer
 
-        val last = repo.fireTimer("e81656cb0d45", Repository.TIMER_ATTEMPTS - 1)
-        assertTrue(last is Repository.TimerOutcome.GaveUp)
-        assertNull(repo.units.value.units.single().offAt)
+    @Test
+    fun `an unreachable unit is retried every 30 seconds, then given up`() = runBlocking {
+        val at = dueTimerOnUnreachableUnit()
+        val repo = repository()
+        for (n in 1 until Repository.TIMER_ATTEMPTS) {
+            assertEquals(Repository.TimerOutcome.Retrying(n), repo.fireTimer(ID))
+            assertEquals(ID to clock + 30_000L, timers.scheduled.last())
+            assertEquals(OffTimer(at, failedAttempts = n, retryAt = clock + 30_000L), storedTimer())
+            clock += 30_000L
+        }
+        val scheduled = timers.scheduled.size
+
+        assertTrue(repo.fireTimer(ID) is Repository.TimerOutcome.GaveUp)
+        assertNull(storedTimer())
+        assertEquals(scheduled, timers.scheduled.size)
+        assertEquals(listOf(ID), timers.cancelled)
+        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer(ID))
+    }
+
+    @Test
+    fun `the retry count survives a restart`() = runBlocking {
+        val at = dueTimerOnUnreachableUnit()
+        assertEquals(Repository.TimerOutcome.Retrying(1), repository().fireTimer(ID))
+        clock += 30_000L
+
+        assertEquals(Repository.TimerOutcome.Retrying(2), repository().fireTimer(ID))
+        assertEquals(OffTimer(at, failedAttempts = 2, retryAt = clock + 30_000L), storedTimer())
+        val json = JSONObject(File(dir, "state.json").readText()).getJSONArray("units").getJSONObject(0)
+        assertEquals(2, json.getInt("offFailedAttempts"))
+        assertEquals(at, json.getLong("offAt"))
+    }
+
+    @Test
+    fun `rescheduling after a restart keeps a pending retry and its count`() = runBlocking {
+        val at = dueTimerOnUnreachableUnit()
+        repository().fireTimer(ID)
+        val retryAt = clock + 30_000L
+        timers.scheduled.clear()
+
+        val restarted = repository()
+        restarted.rescheduleAll()
+        assertEquals(listOf(ID to retryAt), timers.scheduled)
+        assertEquals(OffTimer(at, failedAttempts = 1, retryAt = retryAt), storedTimer())
+
+        // The alarm rescheduleAll set can go off along with the retry alarm; only one attempt counts.
+        assertEquals(Repository.TimerOutcome.NotDue, restarted.fireTimer(ID))
+        clock = retryAt
+        assertEquals(Repository.TimerOutcome.Retrying(2), restarted.fireTimer(ID))
+    }
+
+    @Test
+    fun `restarting before every attempt still gives up after the limit`() = runBlocking {
+        dueTimerOnUnreachableUnit()
+        val outcomes = (1..Repository.TIMER_ATTEMPTS).map {
+            val repo = repository()
+            repo.rescheduleAll()
+            repo.fireTimer(ID).also { clock += 30_000L }
+        }
+        assertEquals((1 until Repository.TIMER_ATTEMPTS).map { Repository.TimerOutcome.Retrying(it) }, outcomes.dropLast(1))
+        assertTrue(outcomes.last() is Repository.TimerOutcome.GaveUp)
+        assertNull(storedTimer())
+        timers.scheduled.clear()
+        repository().rescheduleAll()
+        assertTrue(timers.scheduled.isEmpty())
+    }
+
+    @Test
+    fun `a timer stored before retries were persisted loads as not yet attempted`() {
+        File(dir, "state.json").writeText(
+            """{"deviceId": "airlan-1", "operatorId": "op", "units": [{"airconId": "$ID", "name": "Woonkamer", "host": "127.0.0.1", "offAt": 1234}]}""",
+        )
+        assertEquals(OffTimer(1234), storedTimer())
+        repository().rescheduleAll()
+        assertEquals(listOf(ID to 1234L), timers.scheduled)
     }
 
     @Test
@@ -150,7 +223,7 @@ class RepositoryTest {
         repo.setTimer("e81656cb0d45", 120)
         repo.apply("e81656cb0d45") { it.copy(power = false) }
         assertEquals(listOf("e81656cb0d45"), timers.cancelled)
-        assertNull(repo.units.value.units.single().offAt)
+        assertNull(repo.units.value.units.single().timer)
     }
 
     @Test
@@ -191,12 +264,12 @@ class RepositoryTest {
         assertEquals(on, repo.state(id))
 
         repo.setTimer(id, 30)
-        assertEquals(Triple(id, clock + 30 * 60_000L, 0), timers.scheduled.last())
+        assertEquals(id to clock + 30 * 60_000L, timers.scheduled.last())
         clock += 30 * 60_000L
-        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer(id, 0))
+        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer(id))
         assertFalse(repo.state(id).power)
         assertEquals(Mode.HEAT, repo.state(id).mode)
-        assertNull(repo.units.value.units.single().offAt)
+        assertNull(repo.units.value.units.single().timer)
     }
 
     @Test

@@ -21,10 +21,27 @@ data class StoredUnit(
     val host: String,
     val scheme: Scheme? = null,
     val certificatePin: String? = null,
-    /** Epoch millis at which the unit should switch off, if a timer is set. */
-    val offAt: Long? = null,
+    /** The pending switch-off, if a timer is set. */
+    val timer: OffTimer? = null,
     val demo: Boolean = false,
 )
+
+/**
+ * A pending switch-off, retries included. This is the single source of truth for the unit's
+ * alarm: Android can drop alarms (reboot, update, a revoked exact-alarm permission), so the
+ * alarm is always derived from this, never the other way round.
+ */
+data class OffTimer(
+    /** Epoch millis at which the user wants the unit off. */
+    val at: Long,
+    /** Attempts to switch the unit off that have failed so far. */
+    val failedAttempts: Int = 0,
+    /** Epoch millis of the next attempt after a failure; null before the first attempt. */
+    val retryAt: Long? = null,
+) {
+    /** When the alarm should go off next. */
+    val dueAt get() = retryAt ?: at
+}
 
 data class StoreState(val deviceId: String, val operatorId: String, val units: List<StoredUnit>)
 
@@ -63,7 +80,15 @@ class UnitStore(private val file: File) {
                     host = u.getString("host"),
                     scheme = u.optString("scheme").takeIf { it.isNotEmpty() }?.let(Scheme::valueOf),
                     certificatePin = u.optString("certificatePin").takeIf { it.isNotEmpty() },
-                    offAt = if (u.has("offAt")) u.getLong("offAt") else null,
+                    timer = if (u.has("offAt")) {
+                        OffTimer(
+                            at = u.getLong("offAt"),
+                            failedAttempts = u.optInt("offFailedAttempts", 0),
+                            retryAt = if (u.has("offRetryAt")) u.getLong("offRetryAt") else null,
+                        )
+                    } else {
+                        null
+                    },
                     demo = u.optBoolean("demo", false),
                 )
             },
@@ -85,7 +110,11 @@ class UnitStore(private val file: File) {
                             .apply {
                                 u.scheme?.let { put("scheme", it.name) }
                                 u.certificatePin?.let { put("certificatePin", it) }
-                                u.offAt?.let { put("offAt", it) }
+                                u.timer?.let { t ->
+                                    put("offAt", t.at)
+                                    if (t.failedAttempts > 0) put("offFailedAttempts", t.failedAttempts)
+                                    t.retryAt?.let { put("offRetryAt", it) }
+                                }
                                 if (u.demo) put("demo", true)
                             }
                     },

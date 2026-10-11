@@ -23,6 +23,8 @@ class AirLanApp : Application() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(TIMER_CHANNEL, getString(R.string.channel_timer), NotificationManager.IMPORTANCE_DEFAULT),
         )
+        // The stored timers are the truth; the alarms may be gone (see rescheduleAll).
+        repository.rescheduleAll()
     }
 
     companion object {
