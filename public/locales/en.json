@@ -31,7 +31,7 @@
   "noUnits": "No air conditioner found on the network.",
   "searching": "Searching",
   "error.unreachable": "The unit is not reachable on the network.",
-  "error.unit_refused": "The unit refused the command. If someone just used another app or a voice assistant, try again in a minute.",
+  "error.unit_refused": "The unit refused the command. Try again in a minute.",
   "error.bad_response": "The unit sent an unexpected reply.",
   "error.invalid": "Invalid value.",
   "error.not_found": "Unknown unit.",
@@ -51,5 +51,8 @@
   "forget": "Forget",
   "forgetConfirm": "Forget {name}? You can find it again by searching.",
   "online": "online",
-  "error.no_unit_at_address": "No air conditioner answers at that address."
+  "error.no_unit_at_address": "No air conditioner answers at that address.",
+  "error.unit_busy": "Another app or a voice assistant just used this unit, and it accepts commands from that one only for a minute. Free again in {s} s.",
+  "error.no_account_slot": "This unit accepts at most four apps or phones, and all four places are taken. Remove the unit from an app you no longer use, or forget it in AirLAN on an old phone, and try again.",
+  "timerFailed": "Could not switch off at {time}: the unit stayed out of reach for over an hour."
 }

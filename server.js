@@ -11,6 +11,8 @@ import { dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WfRacClient, WfRacError, MODE_NAMES, PORT as WFRAC_PORT } from './wfrac.js';
 import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
+import { browse } from './mdns.js';
+import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from './timer-policy.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = join(process.env.AIRLAN_DATA_DIR ?? join(ROOT, 'data'), 'state.json');
@@ -26,7 +28,13 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 // ---------- persistent state ----------
 
-/** @type {{ deviceId: string, operatorId: string, units: {airconId: string, name: string | null, host: string, scheme?: string, offAt?: number}[] }} */
+/**
+ * deviceId is this installation's own: the unit's write lock tells writers apart by it. The
+ * account (operatorId) is AirLAN's shared one, see AIRLAN_OPERATOR_ID. legacyOperatorId is
+ * the account of its own that AirLAN 0.1.1 and older registered; units are moved off it
+ * (accountMigrated) as they are reached, see migrate().
+ * @type {{ deviceId: string, legacyOperatorId?: string, units: {airconId: string, name: string | null, host: string, scheme?: string, offAt?: number, timerFailedAt?: number, accountMigrated?: boolean}[] }}
+ */
 let store;
 
 async function loadStore() {
@@ -34,7 +42,11 @@ async function loadStore() {
     store = JSON.parse(await readFile(DATA_FILE, 'utf8'));
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
-    store = { deviceId: `airlan-${randomUUID().slice(0, 8)}`, operatorId: randomUUID(), units: [] };
+    store = { deviceId: `airlan-${randomUUID().slice(0, 8)}`, units: [] };
+  }
+  if (store.operatorId) {
+    store.legacyOperatorId ??= store.operatorId;
+    delete store.operatorId;
   }
 }
 
@@ -75,12 +87,18 @@ async function adopt(host) {
   return unit;
 }
 
-/** Scans the local network for WF-RAC modules. */
+/** Modules that announce themselves by mDNS: `[{ airconId, address }]`. Quick, but not every module answers every time. */
+const announced = () => browse(lanAddresses(os.networkInterfaces()));
+
+/**
+ * Looks for WF-RAC modules: by mDNS, and by probing every address on the local network for
+ * the module's port, as not every module answers mDNS reliably.
+ */
 function scan() {
   if (scanning) return scanning;
   scanning = (async () => {
-    const open = await findOpen(hostsToScan(os.networkInterfaces()));
-    for (const host of open) {
+    const [byMdns, open] = await Promise.all([announced(), findOpen(hostsToScan(os.networkInterfaces()))]);
+    for (const host of new Set([...byMdns.map((m) => m.address), ...open])) {
       try {
         await adopt(host);
       } catch (e) {
@@ -95,10 +113,9 @@ function scan() {
 
 // ---------- talking to units ----------
 
-const ids = () => ({ deviceId: store.deviceId, operatorId: store.operatorId });
+const ids = () => ({ deviceId: store.deviceId });
 const clients = new Map();
 const cache = new Map(); // airconId -> { at, contents, state }
-const registered = new Set();
 
 function clientFor(unit) {
   let c = clients.get(unit.airconId);
@@ -109,15 +126,32 @@ function clientFor(unit) {
   return c;
 }
 
-/** Runs an action on a unit; on a network failure, rescans once and retries. */
+/**
+ * Looks for a unit that stopped answering, in case DHCP moved it: asks mDNS first, which
+ * names the unit directly, and falls back to a full scan (at most once a minute).
+ * Returns whether the unit is now known at a different address.
+ */
+async function relocate(unit) {
+  const before = unit.host;
+  const found = (await announced()).find((m) => m.airconId === unit.airconId);
+  if (found && found.address !== before) {
+    await adopt(found.address).catch(() => {});
+    await saveStore();
+  } else if (!found && Date.now() - lastScan >= 60_000) {
+    await scan();
+  }
+  return unit.host !== before;
+}
+
+/** Runs an action on a unit; on a network failure, looks for the unit and retries if it moved. */
 async function withUnit(unit, fn) {
   const client = clientFor(unit);
   try {
     return await fn(client);
   } catch (e) {
-    if (e instanceof WfRacError || Date.now() - lastScan < 60_000) throw e;
-    log(`unit ${unit.airconId} unreachable at ${unit.host}, rescanning`);
-    await scan();
+    if (e instanceof WfRacError) throw e;
+    log(`unit ${unit.airconId} unreachable at ${unit.host}, looking for it`);
+    if (!(await relocate(unit))) throw e;
     return fn(clientFor(unit));
   } finally {
     if (client.scheme && client.scheme !== unit.scheme) {
@@ -127,36 +161,35 @@ async function withUnit(unit, fn) {
   }
 }
 
-async function readStat(unit, { fresh = false } = {}) {
+async function readStat(unit) {
   const hit = cache.get(unit.airconId);
-  if (!fresh && hit && Date.now() - hit.at < STAT_CACHE_MS) return hit;
-  const { contents, state } = await withUnit(unit, (c) => c.getStat(unit.airconId));
-  const entry = { at: Date.now(), contents, state };
+  if (hit && Date.now() - hit.at < STAT_CACHE_MS) return hit;
+  const { state } = await withUnit(unit, (c) => c.getStat(unit.airconId));
+  const entry = { at: Date.now(), state };
   cache.set(unit.airconId, entry);
   return entry;
 }
 
 /**
- * Writes require an account registered with the unit. Local accounts cannot be read
- * back (remoteList only lists cloud accounts), but registering the same operatorId
- * again is idempotent: it keeps occupying the same slot.
+ * Registers our account with a unit the user claims (adds or names), so a unit without a
+ * free account slot shows up then and not at the first switch. Registering again is
+ * idempotent: the account keeps its slot. Returns a warning for a full unit; any other
+ * failure is left for the first write, which registers too.
  */
-async function ensureRegistered(unit) {
-  if (registered.has(unit.airconId)) return;
-  await withUnit(unit, (c) => c.registerAccount(unit.airconId, TIMEZONE));
-  registered.add(unit.airconId);
+async function registerWarning(unit) {
+  try {
+    await (needsMigration(unit) ? migrate(unit) : withUnit(unit, (c) => c.registerAccount(unit.airconId, TIMEZONE)));
+    return null;
+  } catch (e) {
+    return e.code === 'no_account_slot' ? { code: e.code, message: e.message } : null;
+  }
 }
 
-async function applyChange(unit, change) {
-  await ensureRegistered(unit);
-  const { contents, state } = await readStat(unit, { fresh: true });
-  const next = { ...state, ...change };
-  const result = await withUnit(unit, (c) => c.setStat(unit.airconId, next));
-  cache.set(unit.airconId, {
-    at: Date.now(),
-    contents,
-    state: { ...next, indoorTemp: result.indoorTemp ?? state.indoorTemp, outdoorTemp: result.outdoorTemp ?? state.outdoorTemp },
-  });
+/** Writes a change; waits up to `waitUpToS` for another client's write lock (see WfRacClient.change). */
+async function applyChange(unit, change, { waitUpToS = 20 } = {}) {
+  await migrate(unit);
+  const state = await withUnit(unit, (c) => c.change(unit.airconId, change, { timezone: TIMEZONE, waitUpToS }));
+  cache.set(unit.airconId, { at: Date.now(), state });
   log(`${unit.name}: ${JSON.stringify(change)}`);
 }
 
@@ -172,22 +205,37 @@ function scheduleTimer(unit) {
   timers.set(unit.airconId, setTimeout(() => fireTimer(unit), Math.max(0, unit.offAt - Date.now())));
 }
 
-async function fireTimer(unit, attempt = 1) {
+/**
+ * Switches the unit off when its timer expires. Failures are retried (see timer-policy.js)
+ * until TIMER_GIVE_UP_MS after the switch-off time; a write lock held by another client is
+ * waited out. Then the timer is dropped and marked failed, for the app to show.
+ */
+async function fireTimer(unit, failed = 0) {
+  const offAt = unit.offAt;
   try {
-    await applyChange(unit, { power: false });
+    await applyChange(unit, { power: false }, { waitUpToS: 0 });
     log(`${unit.name}: timer expired, switched off`);
-    delete unit.offAt;
+    if (unit.offAt === offAt) delete unit.offAt;
     timers.delete(unit.airconId);
     await saveStore();
   } catch (e) {
-    // E.g. the unit is briefly unreachable, or another client holds the 60 s write lock.
-    const retry = attempt < 20;
-    log(`${unit.name}: timer could not switch off (${e.message})${retry ? ', retrying in 30 s' : ', giving up'}`);
-    if (retry) timers.set(unit.airconId, setTimeout(() => fireTimer(unit, attempt + 1), 30_000));
+    if (unit.offAt !== offAt) return; // Cancelled or replaced meanwhile.
+    const delay = Math.max(timerRetryDelayMs(failed + 1), ((e.retryAfterS ?? 0) + 2) * 1000);
+    if (Date.now() + delay <= offAt + TIMER_GIVE_UP_MS) {
+      log(`${unit.name}: timer could not switch off (${e.message}), retrying in ${Math.round(delay / 1000)} s`);
+      timers.set(unit.airconId, setTimeout(() => fireTimer(unit, failed + 1), delay));
+    } else {
+      log(`${unit.name}: timer could not switch off (${e.message}), giving up`);
+      delete unit.offAt;
+      unit.timerFailedAt = offAt;
+      timers.delete(unit.airconId);
+      await saveStore();
+    }
   }
 }
 
 async function setTimer(unit, minutes) {
+  delete unit.timerFailedAt;
   if (minutes == null) delete unit.offAt;
   else unit.offAt = Date.now() + minutes * 60_000;
   scheduleTimer(unit);
@@ -196,14 +244,17 @@ async function setTimer(unit, minutes) {
 
 // ---------- HTTP ----------
 
-// Error codes are part of the API: the web app translates them.
+// Error codes are part of the API: the web app translates them. unit_busy also says when
+// the unit is free again (retryAfterS).
 class HttpError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, extra = {}) { super(message); this.status = status; this.code = code; this.extra = extra; }
+
+  get body() { return { code: this.code, message: this.message, ...this.extra }; }
 }
 
 function toHttpError(e) {
   if (e instanceof HttpError) return e;
-  if (e instanceof WfRacError) return new HttpError(502, e.code, e.message);
+  if (e instanceof WfRacError) return new HttpError(502, e.code, e.message, e.retryAfterS != null ? { retryAfterS: e.retryAfterS } : {});
   return new HttpError(502, 'unreachable', e.message);
 }
 
@@ -226,10 +277,42 @@ function parseChange(body) {
   return change;
 }
 
+/**
+ * Moves a unit off the account AirLAN 0.1.1 and older registered per installation to the
+ * shared one (WfRacClient.migrateAccount), once. Registering goes through here until then,
+ * so that the old slot is freed before the shared account needs one. Named units are also
+ * moved in the background whenever they are reached (see unitView).
+ */
+const migrations = new Map();
+function migrate(unit) {
+  if (!needsMigration(unit)) return Promise.resolve();
+  if (!migrations.has(unit.airconId)) {
+    const run = clientFor(unit)
+      .migrateAccount(unit.airconId, store.legacyOperatorId, TIMEZONE)
+      .then(
+        () => {
+          unit.accountMigrated = true;
+          log(`${unit.name ?? unit.airconId}: moved to the shared AirLAN account`);
+          return saveStore();
+        },
+        (e) => {
+          log(`${unit.name ?? unit.airconId}: could not move to the shared AirLAN account yet (${e.message})`);
+          throw e;
+        },
+      )
+      .finally(() => migrations.delete(unit.airconId));
+    migrations.set(unit.airconId, run);
+  }
+  return migrations.get(unit.airconId);
+}
+
+const needsMigration = (unit) => !!store.legacyOperatorId && !unit.accountMigrated;
+
 async function unitView(unit) {
-  const base = { airconId: unit.airconId, name: unit.name, host: unit.host, offAt: unit.offAt ?? null };
+  const base = { airconId: unit.airconId, name: unit.name, host: unit.host, offAt: unit.offAt ?? null, timerFailedAt: unit.timerFailedAt ?? null };
   try {
     const { state } = await readStat(unit);
+    if (unit.name) migrate(unit).catch(() => {});
     return {
       ...base,
       online: true,
@@ -242,7 +325,7 @@ async function unitView(unit) {
     };
   } catch (e) {
     const err = toHttpError(e);
-    return { ...base, online: false, error: { code: err.code, message: err.message } };
+    return { ...base, online: false, error: err.body };
   }
 }
 
@@ -307,13 +390,15 @@ async function route(req, res) {
       throw e instanceof WfRacError ? e : new HttpError(502, 'no_unit_at_address', `no WF-RAC module answers at ${host}`);
     }
     await saveStore();
-    return send(200, await unitView(unit));
+    const warning = await registerWarning(unit);
+    return send(200, { ...(await unitView(unit)), ...(warning && { warning }) });
   }
 
   const m = pathname.match(/^\/api\/units\/([0-9a-f]{12})(\/timer)?$/);
   if (m) {
     const unit = findUnit(m[1]);
     if (!m[2] && req.method === 'DELETE') {
+      // The account stays: it is shared with every other AirLAN client of this unit.
       await setTimer(unit, null);
       store.units.splice(store.units.indexOf(unit), 1);
       clients.delete(unit.airconId);
@@ -325,19 +410,23 @@ async function route(req, res) {
     }
     if (!m[2] && req.method === 'PATCH') {
       const body = await readJson(req);
+      let warning = null;
       if ('name' in body) {
         const name = String(body.name).trim().slice(0, 40);
         if (!name) throw new HttpError(400, 'invalid', 'name must not be empty');
         unit.name = name;
         await saveStore();
+        warning = await registerWarning(unit);
       }
       const change = parseChange(body);
       if (Object.keys(change).length) {
         await applyChange(unit, change);
+        delete unit.timerFailedAt;
         // Switching off makes a pending timer pointless.
         if (change.power === false && unit.offAt) await setTimer(unit, null);
+        await saveStore();
       }
-      return send(200, await unitView(unit));
+      return send(200, { ...(await unitView(unit)), ...(warning && { warning }) });
     }
     if (m[2] && req.method === 'PUT') {
       const { minutes } = await readJson(req);
@@ -370,9 +459,9 @@ http
   .createServer((req, res) => {
     route(req, res).catch((e) => {
       const err = toHttpError(e);
-      if (err.status >= 500) log(`${req.method} ${req.url}: ${e.stack ?? e.message}`);
+      if (err.status >= 500) log(`${req.method} ${req.url}: ${e instanceof WfRacError ? e.message : e.stack ?? e.message}`);
       res.writeHead(err.status, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: err.code, message: err.message } }));
+      res.end(JSON.stringify({ error: err.body }));
     });
   })
   .listen(HTTP_PORT, () => {

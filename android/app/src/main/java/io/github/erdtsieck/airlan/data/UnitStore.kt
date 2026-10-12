@@ -24,6 +24,8 @@ data class StoredUnit(
     /** The pending switch-off, if a timer is set. */
     val timer: OffTimer? = null,
     val demo: Boolean = false,
+    /** Moved off [StoreState.legacyOperatorId] to the shared account; see [Repository.migrateAccounts]. */
+    val accountMigrated: Boolean = false,
 )
 
 /**
@@ -43,7 +45,12 @@ data class OffTimer(
     val dueAt get() = retryAt ?: at
 }
 
-data class StoreState(val deviceId: String, val operatorId: String, val units: List<StoredUnit>)
+/**
+ * [deviceId] is this installation's own: the unit's write lock tells writers apart by it. The
+ * account is AirLAN's shared one (AIRLAN_OPERATOR_ID); [legacyOperatorId] is the account of
+ * its own that AirLAN 0.1.1 and older registered, null on installations that never had one.
+ */
+data class StoreState(val deviceId: String, val legacyOperatorId: String?, val units: List<StoredUnit>)
 
 /** The app's persistent state, as one JSON file written atomically. */
 class UnitStore(private val file: File) {
@@ -66,12 +73,13 @@ class UnitStore(private val file: File) {
         update { s -> s.copy(units = s.units.map { if (it.airconId == airconId) transform(it) else it }) }
 
     private fun load(): StoreState {
-        if (!file.isFile) return StoreState("airlan-${UUID.randomUUID().toString().take(8)}", UUID.randomUUID().toString(), emptyList())
+        if (!file.isFile) return StoreState("airlan-${UUID.randomUUID().toString().take(8)}", null, emptyList())
         val json = JSONObject(file.readText())
         val units = json.getJSONArray("units")
         return StoreState(
             deviceId = json.getString("deviceId"),
-            operatorId = json.getString("operatorId"),
+            // 0.1.1 and older stored their own account as "operatorId".
+            legacyOperatorId = (json.optString("legacyOperatorId").ifEmpty { json.optString("operatorId") }).ifEmpty { null },
             units = (0 until units.length()).map { i ->
                 val u = units.getJSONObject(i)
                 StoredUnit(
@@ -90,6 +98,7 @@ class UnitStore(private val file: File) {
                         null
                     },
                     demo = u.optBoolean("demo", false),
+                    accountMigrated = u.optBoolean("accountMigrated", false),
                 )
             },
         )
@@ -98,7 +107,7 @@ class UnitStore(private val file: File) {
     private fun write(state: StoreState) {
         val json = JSONObject()
             .put("deviceId", state.deviceId)
-            .put("operatorId", state.operatorId)
+            .apply { state.legacyOperatorId?.let { put("legacyOperatorId", it) } }
             .put(
                 "units",
                 JSONArray(
@@ -116,6 +125,7 @@ class UnitStore(private val file: File) {
                                     t.retryAt?.let { put("offRetryAt", it) }
                                 }
                                 if (u.demo) put("demo", true)
+                                if (u.accountMigrated) put("accountMigrated", true)
                             }
                     },
                 ),

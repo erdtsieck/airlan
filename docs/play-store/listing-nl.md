@@ -16,11 +16,11 @@ Wat je per airco kunt doen:
 • Aan- en uitzetten
 • Kiezen tussen koelen en verwarmen
 • De temperatuur instellen in halve graden
-• Hem automatisch laten uitgaan na 30 minuten of 1 tot 6 uur
+• Hem automatisch laten uitgaan na 15 of 30 minuten of 1 tot 6 uur
 
 Meer niet, en dat is expres. AirLAN vindt de airco's op je netwerk zelf en vraagt je ze een naam te geven. Je kunt er ook een toevoegen op IP-adres, bijvoorbeeld als je slimme apparaten op een apart netwerk zitten.
 
-De uitschakeltimer draait als wekker op je telefoon, dus hij werkt ook als de app dicht is en na een herstart. Is de airco niet bereikbaar als de timer afgaat, dan blijft AirLAN het tien minuten proberen en laat het je weten als het niet lukte.
+De uitschakeltimer draait als wekker op je telefoon, dus hij werkt ook als de app dicht is en na een herstart. Is de airco niet bereikbaar als de timer afgaat, dan blijft AirLAN het ruim een uur proberen (de wifi-module valt soms een tijdje van het netwerk) en laat het je weten als het niet lukte.
 
 Geen airco bij de hand? Tik op "Probeer een demo-airco" om AirLAN te proberen met een gesimuleerde airco, duidelijk gemarkeerd als demo, timer inbegrepen.
 

@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.erdtsieck.airlan"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     signingConfigs {
@@ -40,8 +40,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("upload")
-        }
+            signingConfig = signingConfigs.findByName("upload")        }
     }
 
     buildFeatures {

@@ -16,11 +16,11 @@ What you can do, per air conditioner:
 • Switch it on or off
 • Choose cooling or heating
 • Set the temperature in half degrees
-• Have it switch off automatically after 30 minutes or 1 to 6 hours
+• Have it switch off automatically after 15 or 30 minutes or 1 to 6 hours
 
 That is all, on purpose. AirLAN finds the air conditioners on your network by itself and asks you to name them. You can also add one by IP address, for example when your smart devices live on a separate network.
 
-The switch-off timer runs on your phone as an alarm, so it also works with the app closed and after a restart. If the air conditioner cannot be reached when the timer goes off, AirLAN keeps trying for ten minutes and tells you if it did not work.
+The switch-off timer runs on your phone as an alarm, so it also works with the app closed and after a restart. If the air conditioner cannot be reached when the timer goes off, AirLAN keeps trying for over an hour (the Wi-Fi module sometimes drops off the network for a while) and tells you if it did not work.
 
 No air conditioner at hand? Tap "Try a demo unit" to try AirLAN with a simulated one, clearly marked as a demo, timer included.
 

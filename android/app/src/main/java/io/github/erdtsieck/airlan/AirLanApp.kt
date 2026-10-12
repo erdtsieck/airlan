@@ -20,6 +20,7 @@ class AirLanApp : Application() {
             timers = AlarmTimerScheduler(this),
             localAddresses = { Discovery.localAddresses(this) },
             localNetworkAllowed = { Discovery.localNetworkAllowed(this) },
+            announced = { Discovery.announced(this) },
         )
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(TIMER_CHANNEL, getString(R.string.channel_timer), NotificationManager.IMPORTANCE_DEFAULT),
