@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -29,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,12 +46,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -66,7 +71,78 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
 
-private val TIMER_MINUTES = listOf(30, 60, 120, 180, 240, 300, 360)
+private val TIMER_MINUTES = listOf(15, 30, 60, 120, 180, 240, 300, 360)
+
+private val GAP = 8.dp
+private val CHIP_PADDING = 8.dp
+
+/**
+ * Equal buttons side by side, [maxColumns] to a row, or fewer when the longest label would
+ * not fit (a large font, a narrow screen, a long translation): then they wrap onto more rows.
+ * Labels are measured, so a button never cuts its text off. [chrome] is the width a button
+ * adds around its label (padding, icon, border).
+ */
+@Composable
+private fun FittingGrid(
+    labels: List<String>,
+    maxColumns: Int,
+    chrome: Dp,
+    modifier: Modifier = Modifier,
+    item: @Composable (index: Int, modifier: Modifier) -> Unit,
+) {
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
+    val density = LocalDensity.current
+    // A little slack for rounding.
+    val needed = with(density) { labels.maxOf { measurer.measure(it, style, maxLines = 1).size.width }.toDp() } + chrome + 2.dp
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val columns = (maxColumns downTo 1).first { n -> n == 1 || (maxWidth - GAP * (n - 1)) / n >= needed }
+        Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
+            labels.indices.chunked(columns).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GAP)) {
+                    row.forEach { i -> item(i, Modifier.weight(1f)) }
+                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A block of text ([start]) with buttons beside it when the text fits next to them, or the
+ * buttons below it (as a [FittingGrid]) when not. Decided by measuring [startTexts], each with
+ * the style it is shown in, and [buttons]; [buttonChrome] is the width a button adds around
+ * its label.
+ */
+@Composable
+private fun SideBySideOrStacked(
+    modifier: Modifier,
+    startTexts: List<Pair<String, TextStyle>>,
+    buttons: List<String>,
+    buttonChrome: Dp,
+    start: @Composable () -> Unit,
+    button: @Composable (index: Int, modifier: Modifier) -> Unit,
+) {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val buttonStyle = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
+    fun width(text: String, style: TextStyle) = with(density) { measurer.measure(text, style, maxLines = 1).size.width.toDp() }
+    val startNeeds = startTexts.maxOf { (text, style) -> width(text, style) } + 2.dp
+    val buttonsNeed = buttons.fold(0.dp) { sum, label -> sum + width(label, buttonStyle) + buttonChrome + GAP } + 2.dp
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        if (startNeeds + buttonsNeed <= maxWidth) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GAP)) {
+                Column(Modifier.weight(1f)) { start() }
+                buttons.indices.forEach { button(it, Modifier) }
+            }
+        } else {
+            Column {
+                start()
+                FittingGrid(buttons, maxColumns = buttons.size, chrome = buttonChrome, Modifier.padding(top = 10.dp)) { i, m -> button(i, m) }
+            }
+        }
+    }
+}
 
 private fun fmt(t: Double?) = t?.let { String.format(Locale.getDefault(), "%.1f", it) } ?: "–"
 
@@ -148,7 +224,8 @@ private fun Pill(
             Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
         }
-        Text(text, color = color, fontWeight = FontWeight.Medium, maxLines = 1)
+        // Never cut a label off: one too long for the button wraps (see FittingGrid for keeping it on one line).
+        Text(text, color = color, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
     }
 }
 
@@ -348,18 +425,20 @@ fun UnitScreen(
             RoundButton(null, stringResource(R.string.warmer), { onNudge(0.5) }, 64.dp, enabled = !disabled && (temp ?: 99.0) < TEMP_MAX, text = "+")
         }
 
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((mode, icon, color) in listOf(Triple(Mode.COOL, AirIcons.cool, c.cool), Triple(Mode.HEAT, AirIcons.heat, c.heat))) {
-                Pill(
-                    modeName(mode),
-                    { if (s?.mode != mode) onMode(mode) },
-                    Modifier.weight(1f),
-                    enabled = !disabled,
-                    filled = if (s?.mode == mode) color else null,
-                    icon = icon,
-                    shape = RoundedCornerShape(14.dp),
-                )
-            }
+        val modes = listOf(Triple(Mode.COOL, AirIcons.cool, c.cool), Triple(Mode.HEAT, AirIcons.heat, c.heat))
+        val modeLabels = modes.map { modeName(it.first) }
+        // Padding, icon and the gap after it, border: see Pill.
+        FittingGrid(modeLabels, maxColumns = 2, chrome = 14.dp * 2 + 20.dp + 8.dp + 2.dp, Modifier.padding(top = 12.dp)) { i, modifier ->
+            val (mode, icon, color) = modes[i]
+            Pill(
+                modeLabels[i],
+                { if (s?.mode != mode) onMode(mode) },
+                modifier,
+                enabled = !disabled,
+                filled = if (s?.mode == mode) color else null,
+                icon = icon,
+                shape = RoundedCornerShape(14.dp),
+            )
         }
         if (s != null && s.mode != Mode.COOL && s.mode != Mode.HEAT) {
             Text(stringResource(R.string.current_mode, modeName(s.mode)), color = c.muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
@@ -393,18 +472,10 @@ fun UnitScreen(
                     Pill(stringResource(R.string.cancel), onCancelTimer)
                 }
             }
-            s?.power == true -> TIMER_MINUTES.chunked(4).forEach { row ->
-                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { m ->
-                        Pill(
-                            if (m < 60) stringResource(R.string.minutes_short, m) else stringResource(R.string.hours_short, m / 60),
-                            { onTimer(m) },
-                            Modifier.weight(1f),
-                            enabled = !disabled,
-                            horizontalPadding = 4.dp,
-                        )
-                    }
-                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            s?.power == true -> {
+                val labels = TIMER_MINUTES.map { m -> if (m < 60) stringResource(R.string.minutes_short, m) else stringResource(R.string.hours_short, m / 60) }
+                FittingGrid(labels, maxColumns = 4, chrome = CHIP_PADDING * 2 + 2.dp) { i, modifier ->
+                    Pill(labels[i], { onTimer(TIMER_MINUTES[i]) }, modifier, enabled = !disabled, horizontalPadding = CHIP_PADDING)
                 }
             }
             else -> Hint(stringResource(R.string.turn_on_for_timer))
@@ -456,19 +527,28 @@ fun ManageScreen(
         if (state.units.isEmpty()) Hint(stringResource(R.string.no_units))
         state.units.forEachIndexed { i, u ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
-            Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(displayName(state, u), fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    // A demo unit has no address; say what it is instead.
-                    Hint(
-                        (if (u.stored.demo) stringResource(R.string.demo_badge) else u.stored.host) + " · " +
-                            stringResource(u.availability),
-                    )
-                }
-                Pill(stringResource(R.string.rename), { renaming = u })
-                Spacer(Modifier.width(8.dp))
-                Pill(stringResource(R.string.forget), { forgetting = u }, textColor = c.danger)
-            }
+            val name = displayName(state, u)
+            // A demo unit has no address; say what it is instead.
+            val detail = (if (u.stored.demo) stringResource(R.string.demo_badge) else u.stored.host) + " · " + stringResource(u.availability)
+            val actions = listOf(stringResource(R.string.rename), stringResource(R.string.forget))
+            // Name and buttons side by side when both fit; with a long name, a large font or a
+            // long translation the buttons go below the name instead of squeezing it.
+            val body = LocalTextStyle.current
+            SideBySideOrStacked(
+                Modifier.padding(vertical = 12.dp),
+                // As shown below: the name in the body style, the detail as a Hint.
+                startTexts = listOf(name to body.copy(fontWeight = FontWeight.SemiBold), detail to body.copy(fontSize = 14.sp)),
+                buttons = actions,
+                buttonChrome = 14.dp * 2 + 2.dp,
+                start = {
+                    Text(name, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Hint(detail)
+                },
+                button = { i, modifier ->
+                    if (i == 0) Pill(actions[0], { renaming = u }, modifier)
+                    else Pill(actions[1], { forgetting = u }, modifier, textColor = c.danger)
+                },
+            )
         }
         if (state.networkAllowed) {
             Pill(

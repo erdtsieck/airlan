@@ -48,4 +48,12 @@ class DiscoveryTest {
             assertTrue(System.currentTimeMillis() - started < 3000)
         }
     }
+
+    @Test
+    fun `an mDNS instance name is a module's airconId only when it is a MAC address`() {
+        assertEquals("e81656c09e49", airconIdOf("e81656c09e49"))
+        assertEquals("e81656c09e49", airconIdOf("E81656C09E49"))
+        assertEquals(null, airconIdOf("Living room printer"))
+        assertEquals(null, airconIdOf("e81656c09e4"))
+    }
 }

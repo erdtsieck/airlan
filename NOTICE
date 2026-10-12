@@ -1,3 +1,9 @@
+How AirLAN handles the module's account table, write lock and mDNS announcement
+follows the WF-RAC module reference of the Mitsubishi WF-RAC Home Assistant
+integration (MIT, blues-sechseck):
+https://github.com/blues-sechseck/Mitsubishi-WF-RAC-Integration/blob/main/docs/wf-rac-module-reference.md
+No code is copied from it.
+
 AirLAN includes code derived from pywfrac
 https://github.com/blues-sechseck/pywfrac
 

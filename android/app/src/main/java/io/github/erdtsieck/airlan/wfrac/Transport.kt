@@ -17,11 +17,21 @@ enum class Scheme { HTTP, HTTPS }
 
 /**
  * The unit answered, but not with success. [code] is stable for the UI to translate:
- *   unit_refused - non-zero result (unregistered account, another client's 60 s write lock, …)
- *   bad_response - the reply was not the expected HTTP/JSON
+ *   unit_refused    - non-zero result, cause unknown
+ *   unit_busy       - another client wrote within the last minute and holds the unit's
+ *                     60-second write lock; [retryAfterS] says when it lapses
+ *   no_account_slot - the unit would not register us: its four account slots are taken
+ *   bad_response    - the reply was not the expected HTTP/JSON
  * Anything else that goes wrong is an [IOException]: the unit could not be reached.
  */
-class WfRacException(val code: String, message: String, val result: Int? = null) : Exception(message)
+class WfRacException(val code: String, message: String, val result: Int? = null, val retryAfterS: Int? = null) : Exception(message) {
+    companion object {
+        const val UNIT_REFUSED = "unit_refused"
+        const val UNIT_BUSY = "unit_busy"
+        const val NO_ACCOUNT_SLOT = "no_account_slot"
+        const val BAD_RESPONSE = "bad_response"
+    }
+}
 
 /**
  * The HTTPS firmware presents a self-signed certificate per unit, so there is no authority
@@ -109,14 +119,14 @@ private fun readResponse(input: InputStream): Pair<Int, String> {
     var last4 = 0
     while (last4 != 0x0d0a0d0a) {
         val b = input.read()
-        if (b < 0) throw WfRacException("bad_response", "connection closed before the response headers ended")
+        if (b < 0) throw WfRacException(WfRacException.BAD_RESPONSE, "connection closed before the response headers ended")
         head.write(b)
         last4 = (last4 shl 8) or b
-        if (head.size() > 16_384) throw WfRacException("bad_response", "response headers too large")
+        if (head.size() > 16_384) throw WfRacException(WfRacException.BAD_RESPONSE, "response headers too large")
     }
     val lines = head.toString(Charsets.ISO_8859_1.name()).split("\r\n")
     val status = lines.first().split(" ").getOrNull(1)?.toIntOrNull()
-        ?: throw WfRacException("bad_response", "not an HTTP response: ${lines.first().take(40)}")
+        ?: throw WfRacException(WfRacException.BAD_RESPONSE, "not an HTTP response: ${lines.first().take(40)}")
     val headers = lines.drop(1).mapNotNull { line ->
         line.indexOf(':').takeIf { it > 0 }?.let { line.substring(0, it).trim().lowercase() to line.substring(it + 1).trim() }
     }.toMap()
@@ -134,7 +144,7 @@ private fun readExactly(input: InputStream, length: Int): ByteArray {
     var read = 0
     while (read < length) {
         val n = input.read(out, read, length - read)
-        if (n < 0) throw WfRacException("bad_response", "response body ended early")
+        if (n < 0) throw WfRacException(WfRacException.BAD_RESPONSE, "response body ended early")
         read += n
     }
     return out
@@ -146,7 +156,7 @@ private fun readChunked(input: InputStream): ByteArray {
         val sizeLine = StringBuilder()
         while (true) {
             val b = input.read()
-            if (b < 0) throw WfRacException("bad_response", "chunked body ended early")
+            if (b < 0) throw WfRacException(WfRacException.BAD_RESPONSE, "chunked body ended early")
             if (b == '\n'.code) break
             if (b != '\r'.code) sizeLine.append(b.toChar())
         }

@@ -31,16 +31,18 @@ class DemoClient(private val now: () -> Long = System::currentTimeMillis) : Airc
     private var indoor = ROOM_TEMP
     private var indoorAt = now()
 
-    override suspend fun getStat(airconId: String): AirconState = mutex.withLock { reported() }
+    override suspend fun getStatus(airconId: String): UnitStatus = mutex.withLock { UnitStatus(reported(), accounts = if (registered) 1 else 0) }
 
     override suspend fun setStat(airconId: String, state: AirconState): AirconState = mutex.withLock {
-        if (!registered) throw WfRacException("unit_refused", "unit refused setAirconStat (result 2)", 2)
+        if (!registered) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 2)", 2)
         advanceIndoor() // up to now under the old state
         this.state = roundTrip(state)
         reported()
     }
 
     override suspend fun registerAccount(airconId: String, timezone: String) = mutex.withLock { registered = true }
+
+    override suspend fun migrateAccount(airconId: String, legacyOperatorId: String, timezone: String) = registerAccount(airconId, timezone)
 
     private fun reported(): AirconState {
         advanceIndoor()

@@ -1,5 +1,6 @@
 package io.github.erdtsieck.airlan.data
 
+import io.github.erdtsieck.airlan.discovery.Announced
 import io.github.erdtsieck.airlan.discovery.Discovery
 import io.github.erdtsieck.airlan.discovery.LocalAddress
 import io.github.erdtsieck.airlan.discovery.hostsToScan
@@ -13,9 +14,12 @@ import java.io.IOException
 import java.net.InetAddress
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 
 /**
  * Schedules the moment a unit's off-timer fires. Backed by AlarmManager on the device. It
@@ -46,6 +50,9 @@ class Repository(
     private val timezone: () -> String = { TimeZone.getDefault().id },
     private val now: () -> Long = System::currentTimeMillis,
     private val localNetworkAllowed: () -> Boolean = { true },
+    /** Modules that announce themselves by mDNS (see [Discovery.announced]). */
+    private val announced: suspend () -> List<Announced> = { emptyList() },
+    private val sleep: suspend (Long) -> Unit = { delay(it) },
 ) {
     val units get() = store.state
 
@@ -68,6 +75,7 @@ class Repository(
     private val clients = ConcurrentHashMap<String, Connection>()
     private val registered = ConcurrentHashMap.newKeySet<String>()
     private val scanMutex = Mutex()
+    private val migrateMutex = Mutex()
     private val firing = ConcurrentHashMap<String, Mutex>()
     private var lastScan = 0L
 
@@ -80,12 +88,12 @@ class Repository(
     private fun newClient(unit: StoredUnit): AirconClient {
         if (unit.demo) return DemoClient(now)
         val ids = store.state.value
-        return WfRacClient(unit.host, ids.deviceId, ids.operatorId, unit.scheme, unit.certificatePin, port, clientIntervalMs)
+        return WfRacClient(unit.host, ids.deviceId, unit.scheme, unit.certificatePin, port, clientIntervalMs, now = now)
     }
 
     private fun require(airconId: String) = store.unit(airconId) ?: throw IllegalArgumentException("unknown unit $airconId")
 
-    /** Runs [block] against a unit; on a network failure, rescans (at most once a minute) and retries. */
+    /** Runs [block] against a unit; on a network failure, looks for the unit and retries if it moved. */
     private suspend fun <T> withUnit(airconId: String, block: suspend (AirconClient) -> T): T {
         val unit = require(airconId)
         if (needsNetworkPermission(unit)) throw LocalNetworkNotAllowedException()
@@ -93,12 +101,26 @@ class Repository(
         try {
             return block(client)
         } catch (e: IOException) {
-            if (now() - lastScan < 60_000) throw e
-            scan()
+            if (unit.demo || !relocate(unit)) throw e
             return block(clientFor(require(airconId)))
         } finally {
             persistTransport(airconId, client)
         }
+    }
+
+    /**
+     * Looks for a unit that stopped answering, in case DHCP gave it another address: asks mDNS
+     * first, which names the unit directly, and falls back to a full scan (at most once a
+     * minute). Returns whether the unit is now known at a different address.
+     */
+    private suspend fun relocate(unit: StoredUnit): Boolean {
+        val found = announced().firstOrNull { it.airconId == unit.airconId }
+        when {
+            found != null && found.host != unit.host -> runCatching { adopt(found.host) }
+            found == null && now() - lastScan >= 60_000 -> scan()
+        }
+        val host = store.unit(unit.airconId)?.host
+        return host != null && host != unit.host
     }
 
     private suspend fun persistTransport(airconId: String, client: AirconClient) {
@@ -111,27 +133,95 @@ class Repository(
 
     suspend fun state(airconId: String): AirconState = withUnit(airconId) { it.getStat(airconId) }
 
+    /** Writes need an account registered with the unit; registering the same id again is idempotent. */
     /**
-     * Applies [change] to the unit's current state and writes it. Writes need an account
-     * registered with the unit; registering the same id again is idempotent.
+     * Writes need an account registered with the unit; registering the same id again is
+     * idempotent. A unit this installation registered its own account with (AirLAN 0.1.1 and
+     * older) is moved to the shared one instead, freeing the old slot first so that it also
+     * works on a full unit; see [AirconClient.migrateAccount].
      */
-    suspend fun apply(airconId: String, change: (AirconState) -> AirconState): AirconState {
-        if (airconId !in registered) {
+    private suspend fun register(airconId: String) = migrateMutex.withLock {
+        val legacy = store.state.value.legacyOperatorId
+        val unit = require(airconId)
+        if (legacy != null && !unit.accountMigrated && !unit.demo) {
+            withUnit(airconId) { it.migrateAccount(airconId, legacy, timezone()) }
+            store.updateUnit(airconId) { it.copy(accountMigrated = true) }
+        } else {
             withUnit(airconId) { it.registerAccount(airconId, timezone()) }
-            registered += airconId
         }
-        return withUnit(airconId) { client ->
-            val next = change(client.getStat(airconId))
-            val echoed = client.setStat(airconId, next)
-            next.copy(indoorTemp = echoed.indoorTemp ?: next.indoorTemp, outdoorTemp = echoed.outdoorTemp ?: next.outdoorTemp)
-        }.also { if (!it.power) cancelTimer(airconId) }
+        registered += airconId
     }
+
+    /**
+     * Registers with a unit the user claims (adds or names), so a unit without a free account
+     * slot shows up then and not at the first switch. Throws only for a full unit
+     * ([WfRacException.NO_ACCOUNT_SLOT]); anything else is left for the first write.
+     */
+    suspend fun claim(airconId: String) {
+        try {
+            register(airconId)
+        } catch (e: WfRacException) {
+            if (e.code == WfRacException.NO_ACCOUNT_SLOT) throw e
+        } catch (e: Exception) {
+            // Unreachable, or no permission: the first write registers.
+        }
+    }
+
+    /**
+     * Applies [change] to the unit's current state and writes it. On a refusal it finds out why:
+     *  - another client holds the write lock: waits for it to lapse when that takes at most
+     *    [waitUpToS] (telling [onWait] how long) and tries once more, or throws
+     *    [WfRacException.UNIT_BUSY];
+     *  - otherwise our account may be gone (deleted from elsewhere): registers again, which
+     *    throws [WfRacException.NO_ACCOUNT_SLOT] when the unit is full, and tries once more.
+     */
+    suspend fun apply(
+        airconId: String,
+        waitUpToS: Int = WRITE_WAIT_S,
+        onWait: (seconds: Int) -> Unit = {},
+        change: (AirconState) -> AirconState,
+    ): AirconState {
+        if (airconId !in registered) register(airconId)
+        val attempt: suspend () -> AirconState = {
+            withUnit(airconId) { client ->
+                val next = change(client.getStat(airconId))
+                val echoed = client.setStat(airconId, next)
+                next.copy(indoorTemp = echoed.indoorTemp ?: next.indoorTemp, outdoorTemp = echoed.outdoorTemp ?: next.outdoorTemp)
+            }
+        }
+        val written = try {
+            attempt()
+        } catch (e: WfRacException) {
+            if (e.code != WfRacException.UNIT_REFUSED) throw e
+            val locked = withUnit(airconId) { it.getStatus(airconId) }.lockedForS
+            if (locked > 0) {
+                if (locked > waitUpToS) throw busy(airconId, locked, e.result)
+                onWait(locked)
+                sleep((locked + 1) * 1000L)
+            } else {
+                registered -= airconId
+                register(airconId)
+            }
+            try {
+                attempt()
+            } catch (again: WfRacException) {
+                if (again.code != WfRacException.UNIT_REFUSED) throw again
+                val left = runCatching { withUnit(airconId) { it.getStatus(airconId) }.lockedForS }.getOrDefault(0)
+                throw if (left > 0) busy(airconId, left, again.result) else again
+            }
+        }
+        if (!written.power) cancelTimer(airconId)
+        return written
+    }
+
+    private fun busy(airconId: String, seconds: Int, result: Int?) =
+        WfRacException(WfRacException.UNIT_BUSY, "unit $airconId is in use by another client for $seconds s", result, seconds)
 
     /** Adds the module at [host], or updates the address of a known one. New units have no name. */
     suspend fun adopt(host: String): StoredUnit {
         requireNetwork()
         val ids = store.state.value
-        val probe = WfRacClient(host, ids.deviceId, ids.operatorId, port = port, minIntervalMs = clientIntervalMs)
+        val probe = WfRacClient(host, ids.deviceId, port = port, minIntervalMs = clientIntervalMs, now = now)
         val airconId = try {
             probe.getDeviceInfo()
         } catch (e: IOException) {
@@ -149,11 +239,20 @@ class Repository(
         return require(airconId)
     }
 
-    /** Scans the local network for units. Returns the number of units it found. */
+    /**
+     * Looks for units: by mDNS, and by probing every address on the local network for the
+     * module's port, as not every module answers mDNS reliably. Returns the number of units
+     * it found.
+     */
     suspend fun scan(): Int = scanMutex.withLock {
         requireNetwork()
         var found = 0
-        for (host in Discovery.findOpen(hostsToScan(localAddresses()), port)) {
+        val hosts = coroutineScope {
+            val byMdns = async { announced().map { it.host } }
+            val open = async { Discovery.findOpen(hostsToScan(localAddresses()), port) }
+            LinkedHashSet(byMdns.await() + open.await())
+        }
+        for (host in hosts) {
             try {
                 adopt(host)
                 found++
@@ -190,10 +289,29 @@ class Repository(
         store.updateUnit(airconId) { it.copy(name = trimmed) }
     }
 
+    /** Forgets a unit. Its account stays: it is shared with every other AirLAN client of the unit. */
     suspend fun forget(airconId: String) {
         timers.cancel(airconId)
         store.update { s -> s.copy(units = s.units.filterNot { it.airconId == airconId }) }
         clients.remove(airconId)
+    }
+
+    /**
+     * Moves the named units off the account AirLAN 0.1.1 and older registered per installation
+     * to the shared one (see [register]), which frees a slot on every unit per phone. Units out
+     * of reach are tried again on the next call; the app calls this on every refresh, and it
+     * does nothing once all units are done.
+     */
+    suspend fun migrateAccounts() {
+        if (store.state.value.legacyOperatorId == null) return
+        for (unit in store.state.value.units) {
+            if (unit.demo || unit.accountMigrated || unit.name == null || needsNetworkPermission(unit)) continue
+            try {
+                register(unit.airconId)
+            } catch (e: Exception) {
+                // Unreachable, or full of other apps' accounts: try again next time.
+            }
+        }
     }
 
     suspend fun setTimer(airconId: String, minutes: Int) {
@@ -218,9 +336,11 @@ class Repository(
 
     /**
      * Called when a unit's alarm goes off. Switches it off, or records the failure and schedules
-     * a retry: the unit may be briefly unreachable, or another client may hold its 60-second
-     * write lock. The attempt count lives in the stored [OffTimer], so it survives the process
-     * and [rescheduleAll]; after [TIMER_ATTEMPTS] failed attempts the timer is given up.
+     * a retry (see [timerRetryDelayMs]): the unit may be out of reach for a while, or another
+     * client may hold its 60-second write lock, which is then waited out. The attempt count
+     * lives in the stored [OffTimer], so it survives the process and [rescheduleAll]; a retry
+     * that would come later than [TIMER_GIVE_UP_MS] after the switch-off time is not made, and
+     * the timer is given up.
      *
      * An alarm can go off more than once for the same attempt (see [rescheduleAll]), so firings
      * for one unit take turns, and each one works from the stored timer as it finds it.
@@ -235,11 +355,13 @@ class Repository(
             // Runs inside a broadcast receiver, which Android gives about a minute. An
             // unreachable unit costs a timeout per transport plus a rescan, so bound the attempt.
             // Switching off clears the timer (see apply).
-            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId) { it.copy(power = false) } }
+            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId, waitUpToS = 0) { it.copy(power = false) } }
             TimerOutcome.SwitchedOff
         } catch (e: Exception) {
             val failed = timer.failedAttempts + 1
-            val next = if (failed < TIMER_ATTEMPTS) timer.copy(failedAttempts = failed, retryAt = now() + TIMER_RETRY_MS) else null
+            val lockLapsesIn = (e as? WfRacException)?.retryAfterS?.let { (it + 2) * 1000L } ?: 0L
+            val retryAt = now() + maxOf(timerRetryDelayMs(failed), lockLapsesIn)
+            val next = if (retryAt <= timer.at + TIMER_GIVE_UP_MS) timer.copy(failedAttempts = failed, retryAt = retryAt) else null
             // The user may have cancelled or replaced the timer meanwhile; leave theirs alone.
             var replaced = false
             store.updateUnit(airconId) { u ->
@@ -273,9 +395,20 @@ class Repository(
 
     companion object {
         const val MAX_TIMER_MINUTES = 6 * 60
-        const val TIMER_ATTEMPTS = 20
-        const val TIMER_RETRY_MS = 30_000L
         const val TIMER_ATTEMPT_TIMEOUT_MS = 40_000L
+
+        /**
+         * How long after the switch-off time the timer keeps trying. The module drops off Wi-Fi
+         * about once an hour and sometimes stays away for up to an hour after that; roaming
+         * between access points can cost 15-35 minutes. Same rule as the server (timer-policy.js).
+         */
+        const val TIMER_GIVE_UP_MS = 75 * 60_000L
+
+        /** The wait before the next attempt after [failed] failed attempts (1, 2, ...): 30 s, 1, 2, 4, then 5 min. */
+        fun timerRetryDelayMs(failed: Int): Long = minOf(5 * 60_000L, 30_000L shl (failed - 1).coerceIn(0, 4))
+
+        /** A user's write waits this long for another client's write lock to lapse. */
+        const val WRITE_WAIT_S = 20
 
         /** Real units are identified by their MAC address, so this cannot collide with one. */
         const val DEMO_AIRCON_ID = "demo"

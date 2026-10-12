@@ -68,9 +68,12 @@
     <string name="exact_alarm_skip">Not now</string>
     <string name="channel_timer">Switch-off timer</string>
     <string name="timer_failed_title">Could not switch off %1$s</string>
-    <string name="timer_failed_text">The timer went off, but the air conditioner could not be reached for ten minutes. Is your phone on your home Wi-Fi?</string>
+    <string name="timer_failed_text">The timer went off, but the air conditioner stayed out of reach for over an hour. Is your phone on your home Wi-Fi?</string>
     <string name="error_unreachable">The unit is not reachable on the network.</string>
-    <string name="error_unit_refused">The unit refused the command. If someone just used another app or a voice assistant, try again in a minute.</string>
+    <string name="error_unit_refused">The unit refused the command. Try again in a minute.</string>
+    <string name="error_unit_busy">Another app or a voice assistant just used this unit, and it accepts commands from that one only for a minute. Free again in %1$d s.</string>
+    <string name="error_no_account_slot">This unit accepts at most four apps or phones, and all four places are taken. Remove the unit from an app you no longer use, or forget it in AirLAN on an old phone, and try again.</string>
+    <string name="waiting_for_unit">Another app just used this unit. Trying again in %1$d s…</string>
     <string name="error_bad_response">The unit sent an unexpected reply.</string>
     <string name="error_invalid">Invalid value.</string>
     <string name="error_no_unit_at_address">No air conditioner answers at that address.</string>

@@ -97,6 +97,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         live.update { old -> old + results }
         // The status line belongs to the last user action; polling leaves it alone.
         ui.update { it.copy(loaded = true) }
+        viewModelScope.launch { repo.migrateAccounts() }
     }
 
     /** First start: find the units without being asked, once the app may use the network. */
@@ -140,6 +141,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ui.update { it.copy(busy = false, selectedId = unit.airconId, screen = Screen.UNIT, status = null) }
             refresh()
             done()
+            repo.claim(unit.airconId)
         } catch (e: Exception) {
             ui.update { it.copy(busy = false) }
             fail(e)
@@ -160,14 +162,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun rename(airconId: String, name: String) = viewModelScope.launch {
         try {
             repo.rename(airconId, name)
+            // Naming a unit claims it: a unit without a free account slot says so now.
+            repo.claim(airconId)
         } catch (e: Exception) {
             fail(e)
         }
     }
 
     fun forget(airconId: String) = viewModelScope.launch {
-        repo.forget(airconId)
         live.update { it - airconId }
+        repo.forget(airconId)
     }
 
     private fun write(change: (AirconState) -> AirconState) {
@@ -175,8 +179,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             ui.update { it.copy(busy = true, status = null) }
             try {
-                val next = repo.apply(id, change)
+                val next = repo.apply(id, onWait = { s -> ui.update { it.copy(status = Status(R.string.waiting_for_unit, s)) } }, change = change)
                 live.update { it + (id to Result.success(next)) }
+                ui.update { it.copy(status = null) }
             } catch (e: Exception) {
                 fail(e)
             } finally {
@@ -216,7 +221,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun fail(e: Exception) {
         Log.w(TAG, "action failed", e)
-        ui.update { it.copy(status = Status(errorText(e), isError = true)) }
+        val busyFor = (e as? WfRacException)?.retryAfterS?.takeIf { e.code == WfRacException.UNIT_BUSY }
+        ui.update { it.copy(status = Status(errorText(e), arg = busyFor, isError = true)) }
     }
 
     companion object {
@@ -228,7 +234,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fun errorText(e: Throwable): Int = when (e) {
             is NoUnitAtAddressException -> R.string.error_no_unit_at_address
             is LocalNetworkNotAllowedException -> R.string.permission_denied
-            is WfRacException -> if (e.code == "unit_refused") R.string.error_unit_refused else R.string.error_bad_response
+            is WfRacException -> when (e.code) {
+                WfRacException.UNIT_REFUSED -> R.string.error_unit_refused
+                WfRacException.UNIT_BUSY -> if (e.retryAfterS != null) R.string.error_unit_busy else R.string.error_unit_refused
+                WfRacException.NO_ACCOUNT_SLOT -> R.string.error_no_account_slot
+                else -> R.string.error_bad_response
+            }
             is IllegalArgumentException -> R.string.error_invalid
             is IOException -> R.string.error_unreachable
             else -> R.string.error_unreachable

@@ -12,7 +12,7 @@ Per unit you can:
 - switch it on or off
 - choose cooling or heating
 - set the temperature (16–30 °C in 0.5° steps)
-- have it switch off automatically after 30 minutes or 1–6 hours
+- have it switch off automatically after 15 or 30 minutes or 1–6 hours
 
 That is all, on purpose. Indoor and outdoor temperature are shown along the way. Both
 follow the device's language (English and Dutch so far) and light/dark theme.
@@ -24,7 +24,8 @@ follow the device's language (English and Dutch so far) and light/dark theme.
 
 The app finds the units on your Wi-Fi network, asks you to name them, and runs the
 switch-off timer as an alarm on the phone: it fires with the app closed, survives a
-restart, retries for ten minutes if the unit cannot be reached and then notifies you. The
+restart, keeps trying for 75 minutes if the unit cannot be reached (see *Limitations*) and
+then notifies you. The
 phone has to be on the home network when the timer fires.
 
 No air conditioner at hand? *Try a demo unit* (on the *Manage units* screen) adds a
@@ -78,8 +79,10 @@ one it finds. Not sure which unit is which? Switch it on from the app and listen
 icon opens *Manage units*: search the network again (for a new unit), add a unit by IP
 address, rename or forget one.
 
-The scan covers networks up to /22 completely; on larger networks only the /24 around the
-server's own address. If your units live on a separate network (an IoT VLAN, for
+Searching asks the network by mDNS (the units announce themselves as `_beaver._tcp`) and
+also probes the module's port on every address, because not every unit answers mDNS every
+time. The probe covers networks up to /22 completely; on larger networks only the /24
+around the server's own address. If your units live on a separate network (an IoT VLAN, for
 instance), add them by IP address and make sure the server can reach port 51443 there.
 
 | Variable | Default | |
@@ -110,14 +113,19 @@ with your result (the firmware branch and versions are in the `getAirconStat` re
 - `wfrac.js`: the local protocol. `POST <scheme>://<unit>:51443/beaver/command/<command>`
   with a base64 `airconStat` frame. The encoder and decoder are a port of
   [pywfrac](https://github.com/blues-sechseck/pywfrac) and are tested byte for byte
-  against it.
-- `discovery.js`: which addresses to scan, and the port probe.
+  against it. How a write deals with the account table and the write lock follows the
+  [WF-RAC module reference](https://github.com/blues-sechseck/Mitsubishi-WF-RAC-Integration/blob/main/docs/wf-rac-module-reference.md)
+  of the Mitsubishi WF-RAC Home Assistant integration.
+- `mdns.js`: just enough multicast DNS to find the units by name.
+- `discovery.js`: which addresses to probe, and the port probe.
+- `timer-policy.js`: when the switch-off timer tries again, and when it gives up.
 - `server.js`: HTTP server and API. It discovers units, follows them when DHCP gives them
-  a new address, registers itself as an account with each unit and runs the switch-off
-  timers.
+  a new address (asking mDNS first), registers AirLAN's account with each unit and runs the
+  switch-off timers.
 - `public/`: the web app.
-- `data/state.json`: unit names, addresses, timers and AirLAN's own account id. Timers
-  survive a restart; a timer that expired while the server was down fires at startup.
+- `data/state.json`: unit names, addresses, timers and this installation's `deviceId`.
+  Timers survive a restart; a timer that expired while the server was down fires at
+  startup.
 
 ### API
 
@@ -140,10 +148,30 @@ Errors come back as `{ "error": { "code", "message" } }` with `code` one of
 - **Home network only.** The units are reachable on the local network only, and so is
   AirLAN. Anyone on that network can control the units. That is also true of the module
   itself, which has no authentication.
-- **Account slot.** Each unit has four account slots. AirLAN uses one.
+- **Account slots.** A unit holds at most four accounts (apps or phones paired with it) and
+  refuses new ones when they are taken; it never pushes one out. Writing needs an account,
+  reading does not. All AirLAN clients, every phone and the server, register the same
+  account, `98c7ec9c-1dac-4e5f-8d16-a145f58a38db`, so AirLAN takes one slot however many
+  phones use it. That id is no secret and guards nothing: the module has no authentication
+  (see *Home network only*). Writers are still told apart by a per-installation `deviceId`.
+  AirLAN 0.1.1 and older registered an account per installation; newer versions free that
+  one and move to the shared account the first time they reach the unit. When a unit is
+  full of other apps' accounts, AirLAN says so (`no_account_slot`) when you add or name it.
+  Remove the unit from an app you no longer use to make room.
 - **Write lock.** After a write, the writer holds an exclusive 60-second write lock. If
   someone just used Smart M-Air or a voice assistant, AirLAN may be refused briefly
-  (`unit_refused`); the timer retries for ten minutes.
+  briefly. AirLAN reads when the lock lapses (`expires` in the unit's status): a lock that
+  lapses within 20 seconds is waited out, otherwise the app says how long it still runs
+  (`unit_busy`). The timer waits it out by itself.
+- **Hourly dropouts.** The module drops off Wi-Fi about once an hour, a reset commanded by the
+  air conditioner itself. Usually it is back within a minute, but sometimes it does not
+  accept connections again until the next hour; roaming between access points or bands can
+  cost 15–35 minutes as well. The switch-off timer therefore keeps trying for 75 minutes,
+  quickly at first and then every 5 minutes. A dedicated 2.4 GHz network for the units, with
+  802.11r and 802.11v off, makes them more reliable.
+- **Heating overshoots on purpose.** In heating mode the unit aims for the set temperature
+  plus 2 °C, so a thermometer at seating height can read warmer than the setting. That is
+  the air conditioner, not AirLAN.
 - **One request at a time.** The module accepts one connection at a time and about one
   request per second. AirLAN queues requests per unit.
 - **No `fetch`.** The module only reads a request body that arrives in the same TCP packet

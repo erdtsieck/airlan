@@ -28,7 +28,7 @@ const ICONS = {
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
 };
-const TIMER_MINUTES = [30, 60, 120, 180, 240, 300, 360];
+const TIMER_MINUTES = [15, 30, 60, 120, 180, 240, 300, 360];
 const TEMP_MIN = 16, TEMP_MAX = 30;
 
 let units = [];
@@ -42,7 +42,7 @@ const fmt = (n) => n == null ? '–' : n.toLocaleString(locale, { minimumFractio
 const unit = () => units.find((u) => u.airconId === selected);
 // Unnamed units are numbered so they can be told apart until the user names them.
 const displayName = (u) => u.name ?? `${t('newUnit')} ${units.filter((x) => !x.name).indexOf(u) + 1}`;
-const errorText = (err) => messages[`error.${err?.code}`] ?? err?.message ?? t('error.server');
+const errorText = (err) => (`error.${err?.code}` in messages ? t(`error.${err.code}`, { s: err.retryAfterS }) : err?.message ?? t('error.server'));
 const timerLabel = (min) => min < 60 ? t('minutesShort', { n: min }) : t('hoursShort', { n: min / 60 });
 
 function setStatus(text, error = false) {
@@ -80,8 +80,10 @@ async function change(body, label, u = unit()) {
   busy = true;
   setStatus(label + '…');
   try {
-    Object.assign(u, await api('PATCH', `/api/units/${u.airconId}`, body));
-    setStatus('');
+    const { warning, ...next } = await api('PATCH', `/api/units/${u.airconId}`, body);
+    Object.assign(u, next);
+    // E.g. the unit has no free account slot: the name is saved, but switching will fail.
+    setStatus(warning ? errorText(warning) : '', !!warning);
   } catch (e) {
     setStatus(errorText(e), true);
   } finally {
@@ -129,6 +131,18 @@ function remaining(offAt) {
   return min % 60 ? t('remainingHours', { h, m: min % 60 }) : t('remainingWholeHours', { h });
 }
 
+/**
+ * Equal buttons side by side, at most `max` to a row, fewer when a label would not fit
+ * (large text, a narrow screen, a long translation): a button never cuts its label off.
+ */
+function fitColumns(grid, max) {
+  if (!grid) return;
+  for (let n = max; n >= 1; n--) {
+    grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+    if (![...grid.children].some((b) => b.scrollWidth > b.clientWidth)) return;
+  }
+}
+
 function escape(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
@@ -158,7 +172,9 @@ function render() {
         u.errorCode && `${t('fault')} ${u.errorCode}`,
       ].filter(Boolean).join(' · ')
     : t('unreachable');
-  const offAtTime = u.offAt && new Date(u.offAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  const clock = (ms) => new Date(ms).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  const offAtTime = u.offAt && clock(u.offAt);
+  const timerFailed = !u.offAt && u.timerFailedAt ? `<p class="hint error">${t('timerFailed', { time: clock(u.timerFailedAt) })}</p>` : '';
 
   const naming = u.name ? '' : `
     <section class="card naming">
@@ -195,6 +211,7 @@ function render() {
 
     <section class="card">
       <h2>${t('autoOff')}</h2>
+      ${timerFailed}
       ${u.offAt ? `
         <div class="timer-active">
           <div><b>${t('offAt', { time: offAtTime })}</b><div class="left">${remaining(u.offAt)}</div></div>
@@ -218,6 +235,8 @@ function render() {
   });
   document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer(Number(b.dataset.min)));
   if ($('cancel')) $('cancel').onclick = () => timer(null);
+  fitColumns(document.querySelector('.modes'), 2);
+  fitColumns(document.querySelector('.chips'), 4);
 }
 
 function renderManage() {
@@ -260,12 +279,12 @@ function renderManage() {
     e.preventDefault();
     setStatus(t('searching') + '…');
     try {
-      const added = await api('POST', '/api/units', { host: $('addInput').value.trim() });
+      const { warning, ...added } = await api('POST', '/api/units', { host: $('addInput').value.trim() });
       units = units.filter((u) => u.airconId !== added.airconId).concat(added);
       selected = added.airconId;
       screen = 'unit';
       render();
-      setStatus('');
+      setStatus(warning ? errorText(warning) : '', !!warning);
     } catch (e) {
       setStatus(errorText(e), true);
     }
@@ -286,6 +305,10 @@ function renderManage() {
 }
 
 $('gear').onclick = () => { screen = 'manage'; render(); };
+addEventListener('resize', () => {
+  fitColumns(document.querySelector('.modes'), 2);
+  fitColumns(document.querySelector('.chips'), 4);
+});
 
 $('units').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-id]');

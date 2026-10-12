@@ -95,7 +95,7 @@ class WfRacClientTest {
     fun closeUnits() = units.forEach { it.close() }
 
     private fun client(port: Int, scheme: Scheme? = null, pin: String? = null, minIntervalMs: Long = 0) =
-        WfRacClient("127.0.0.1", "test", "op", scheme, pin, port, minIntervalMs, timeoutMs = 2000)
+        WfRacClient("127.0.0.1", "test", scheme, pin, port, minIntervalMs, timeoutMs = 2000)
 
     @Test
     fun `talks plain HTTP and sends the whole request in one write`() = runBlocking {

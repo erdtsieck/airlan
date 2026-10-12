@@ -11,7 +11,7 @@ test('every key the app uses exists in English', () => {
   const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   const used = new Set([...source.matchAll(/\bt\('([\w.]+)'/g)].map((m) => m[1]));
   for (const mode of ['cool', 'heat', 'auto', 'fan', 'dry']) used.add(mode);
-  for (const code of ['unreachable', 'unit_refused', 'bad_response', 'invalid', 'not_found', 'server']) used.add(`error.${code}`);
+  for (const code of ['unreachable', 'unit_refused', 'unit_busy', 'no_account_slot', 'bad_response', 'invalid', 'not_found', 'server']) used.add(`error.${code}`);
   for (const key of used) assert.ok(key in english, `missing in en.json: ${key}`);
 });
 

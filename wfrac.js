@@ -127,16 +127,37 @@ export function encode(s) {
 
 /**
  * The unit answered, but not with success. `code` is stable for clients to translate:
- *   unit_refused  - non-zero result (unregistered account, another client's 60 s write lock, …)
- *   bad_response  - the reply was not the expected JSON
+ *   unit_refused     - non-zero result, cause unknown
+ *   unit_busy        - another client wrote within the last minute and holds the unit's
+ *                      60-second write lock; `retryAfterS` says when it lapses
+ *   no_account_slot  - the unit would not register us: its four account slots are taken
+ *   bad_response     - the reply was not the expected JSON
  */
 export class WfRacError extends Error {
-  constructor(code, message, result) {
+  constructor(code, message, result, retryAfterS) {
     super(message);
     this.code = code;
     this.result = result;
+    if (retryAfterS != null) this.retryAfterS = retryAfterS;
   }
 }
+
+/** A unit holds at most this many accounts; a full table refuses new ones (it never evicts). */
+export const ACCOUNT_SLOTS = 4;
+
+/** An applied write locks out every other client for this long. */
+export const WRITE_LOCK_S = 60;
+
+/**
+ * The account every AirLAN client registers with a unit, the Android app included, so that
+ * AirLAN takes one of the unit's four slots however many phones use it. The module has no
+ * authentication: an operatorId only marks an account slot, it guards nothing. Writers are
+ * told apart by deviceId, which stays per installation (the write lock keys on it).
+ */
+export const AIRLAN_OPERATOR_ID = '98c7ec9c-1dac-4e5f-8d16-a145f58a38db';
+
+const nowS = () => Math.round(Date.now() / 1000);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The HTTPS firmware runs mbedTLS 2.4 (2016): self-signed certificate, legacy ciphers
 // and legacy renegotiation. Verification is pointless against a self-signed per-unit
@@ -200,8 +221,10 @@ function post(scheme, host, port, command, payload) {
 export class WfRacClient {
   #queue = Promise.resolve();
   #lastRequestAt = 0;
+  #registered = new Set();
+  #ownLockUntil = new Map(); // airconId -> the `expires` our own last write set
 
-  constructor({ host, port = PORT, scheme = null, deviceId, operatorId, minIntervalMs = 1100 }) {
+  constructor({ host, port = PORT, scheme = null, deviceId, operatorId = AIRLAN_OPERATOR_ID, minIntervalMs = 1100 }) {
     this.host = host;
     this.port = port;
     this.scheme = scheme;
@@ -232,7 +255,7 @@ export class WfRacClient {
     throw lastError;
   }
 
-  request(command, contents) {
+  request(command, contents, { operatorId = this.operatorId } = {}) {
     const run = async () => {
       const wait = this.#lastRequestAt + this.minIntervalMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -241,7 +264,7 @@ export class WfRacClient {
           apiVer: '1.0',
           command,
           deviceId: this.deviceId,
-          operatorId: this.operatorId,
+          operatorId,
           timestamp: Math.round(Date.now() / 1000),
           ...(contents ? { contents } : {}),
         });
@@ -260,18 +283,115 @@ export class WfRacClient {
     return this.request('getDeviceInfo', {});
   }
 
+  /**
+   * The unit's state, plus `lockedForS`: how long another client's write lock still runs
+   * (0 when nobody else holds it), and `accounts`: occupied account slots. Reads neither
+   * take nor test the write lock.
+   */
   async getStat(airconId) {
     const contents = await this.request('getAirconStat', { airconId });
-    return { contents, state: decode(contents.airconStat) };
+    return { contents, state: decode(contents.airconStat), lockedForS: this.#lockedForS(airconId, contents), accounts: contents.numOfAccount ?? null };
+  }
+
+  /**
+   * `expires` is when the last writer's lock lapses, on the module's clock - which every
+   * request sets from its own timestamp, so it compares with ours directly. A lock our own
+   * last write set does not count: the unit lets its holder through.
+   */
+  #lockedForS(airconId, contents) {
+    const expires = Number(contents.expires);
+    if (!Number.isFinite(expires)) return 0;
+    if (Math.abs(expires - (this.#ownLockUntil.get(airconId) ?? -Infinity)) <= 2) return 0;
+    return Math.max(0, expires - nowS());
   }
 
   async setStat(airconId, state) {
     const contents = await this.request('setAirconStat', { airconId, airconStat: encode(state) });
+    this.#ownLockUntil.set(airconId, nowS() + WRITE_LOCK_S);
     return decode(contents.airconStat);
   }
 
-  /** Writes require a registered account (4 slots per unit). Re-registering the same id is idempotent. */
-  registerAccount(airconId, timezone) {
-    return this.request('updateAccountInfo', { accountId: this.operatorId, airconId, remote: 0, timezone });
+  /**
+   * Writes require a registered account (4 slots per unit). Re-registering the same id is
+   * idempotent. A full table refuses a new account; that is told apart from other refusals
+   * by the unit's account count.
+   */
+  async registerAccount(airconId, timezone) {
+    try {
+      await this.request('updateAccountInfo', { accountId: this.operatorId, airconId, remote: 0, timezone });
+    } catch (e) {
+      if (e.code !== 'unit_refused') throw e;
+      const { accounts } = await this.getStat(airconId).catch(() => ({ accounts: null }));
+      if (accounts == null || accounts >= ACCOUNT_SLOTS) {
+        throw new WfRacError('no_account_slot', `unit ${airconId} has no free account slot (${accounts ?? '?'} of ${ACCOUNT_SLOTS} taken)`, e.result);
+      }
+      throw e;
+    }
+    this.#registered.add(airconId);
+  }
+
+  /**
+   * Frees the slot of account `accountId` on the unit, sending the request as that account.
+   * A unit answers result 1 for an account it does not hold: the slot is free already.
+   */
+  async deleteAccount(airconId, accountId) {
+    if (accountId === this.operatorId) this.#registered.delete(airconId);
+    try {
+      await this.request('deleteAccountInfo', { accountId, airconId }, { operatorId: accountId });
+    } catch (e) {
+      if (!(e.code === 'unit_refused' && e.result === 1)) throw e;
+    }
+  }
+
+  /**
+   * Moves this installation from its own account (`legacyOperatorId`, from AirLAN 0.1.1 and
+   * older, one per installation) to the shared one: frees the old slot first, which makes
+   * room on a full unit, then registers the shared account.
+   */
+  async migrateAccount(airconId, legacyOperatorId, timezone) {
+    if (legacyOperatorId && legacyOperatorId !== this.operatorId) await this.deleteAccount(airconId, legacyOperatorId);
+    await this.registerAccount(airconId, timezone);
+  }
+
+  /**
+   * Applies `change` to the unit's current state and writes it; returns the state written,
+   * with the temperatures the unit reported back. On a refusal it finds out why:
+   *  - another client holds the write lock: waits for it to lapse when that takes at most
+   *    `waitUpToS` (calling `onWait(seconds)`) and tries once more, or throws unit_busy;
+   *  - otherwise our account may be gone (deleted, or never registered): registers again,
+   *    which throws no_account_slot when the unit is full, and tries once more.
+   */
+  async change(airconId, change, { timezone, waitUpToS = 20, onWait } = {}) {
+    if (!this.#registered.has(airconId)) await this.registerAccount(airconId, timezone);
+    const attempt = async () => {
+      const { state } = await this.getStat(airconId);
+      const next = { ...state, ...change };
+      const echoed = await this.setStat(airconId, next);
+      return { ...next, indoorTemp: echoed.indoorTemp ?? state.indoorTemp, outdoorTemp: echoed.outdoorTemp ?? state.outdoorTemp };
+    };
+    try {
+      return await attempt();
+    } catch (e) {
+      if (e.code !== 'unit_refused') throw e;
+      const { lockedForS } = await this.getStat(airconId);
+      if (lockedForS > 0) {
+        if (lockedForS > waitUpToS) throw this.#busy(airconId, lockedForS, e.result);
+        onWait?.(lockedForS);
+        await sleep((lockedForS + 1) * 1000);
+      } else {
+        await this.registerAccount(airconId, timezone);
+      }
+      try {
+        return await attempt();
+      } catch (again) {
+        if (again.code !== 'unit_refused') throw again;
+        const { lockedForS: left } = await this.getStat(airconId).catch(() => ({ lockedForS: 0 }));
+        throw left > 0 ? this.#busy(airconId, left, again.result) : again;
+      }
+    }
+  }
+
+  #busy(airconId, seconds, result) {
+    return new WfRacError('unit_busy', `unit ${airconId} is in use by another client for ${seconds} s`, result, seconds);
   }
 }
