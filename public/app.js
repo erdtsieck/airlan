@@ -26,8 +26,16 @@ const ICONS = {
   cool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11"/><path d="M9 4l3 2.5L15 4M9 20l3-2.5L15 20"/></svg>',
   heat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6l6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6-6"/></svg>',
   edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
 };
+// Fan speed: 'auto' or a manual step; the up/down vane: 'swing' or a fixed position (1 is the top).
+const FAN_SPEEDS = ['auto', 1, 2, 3, 4];
+const VANES = ['swing', 1, 2, 3, 4];
+const parseSetting = (s) => /^\d$/.test(s) ? Number(s) : s;
+const fanLabel = (f) => f === 'auto' ? t('fanAuto') : f ?? '–';
+const vaneLabel = (v) => v === 'swing' ? t('swing') : v ?? '–';
 const TIMER_MINUTES = [15, 30, 60, 120, 180, 240, 300, 360];
 const TEMP_MIN = 16, TEMP_MAX = 30;
 
@@ -41,6 +49,8 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n) => n == null ? '–' : n.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const unit = () => units.find((u) => u.airconId === selected);
 // Unnamed units are numbered so they can be told apart until the user names them.
+// A unit's airconId is its Wi-Fi module's MAC address; shown as printed on the module.
+const macLabel = (id) => /^[0-9a-f]{12}$/.test(id) ? id.toUpperCase().match(/../g).join(':') : id;
 const displayName = (u) => u.name ?? `${t('newUnit')} ${units.filter((x) => !x.name).indexOf(u) + 1}`;
 const errorText = (err) => (`error.${err?.code}` in messages ? t(`error.${err.code}`, { s: err.retryAfterS }) : err?.message ?? t('error.server'));
 const timerLabel = (min) => min < 60 ? t('minutesShort', { n: min }) : t('hoursShort', { n: min / 60 });
@@ -139,23 +149,63 @@ function fitColumns(grid, max) {
   if (!grid) return;
   for (let n = max; n >= 1; n--) {
     grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
-    if (![...grid.children].some((b) => b.scrollWidth > b.clientWidth)) return;
+    if (![...grid.children].some(overflows)) return;
   }
+}
+
+/**
+ * Whether an element's content is wider than the room inside its padding. scrollWidth misses
+ * content that only runs into the right padding, so measure the content itself.
+ */
+function overflows(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const style = getComputedStyle(el);
+  const room = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  return range.getBoundingClientRect().width > room + 0.5;
 }
 
 function escape(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-function render() {
-  $('units').innerHTML = units.map((u) => `
+/** A unit's tile: a dot for how it stands, its name, and its set temperature when on. */
+function tile(u) {
+  const known = u.mode === 'cool' || u.mode === 'heat' ? u.mode : 'other';
+  const [dot, standing] = !u.online ? ['unreachable', t('unreachable')]
+    : !u.power ? ['', t('tileOff')]
+    : [`on ${known}`, t('tileOn', { mode: t(u.mode) })];
+  return `
     <button role="tab" aria-selected="${u.airconId === selected}" data-id="${u.airconId}">
-      <span class="dot ${u.power ? u.mode : ''}"></span>${escape(displayName(u))}
-    </button>`).join('');
-  $('units').style.visibility = units.length < 2 ? 'hidden' : '';
-  $('gear').innerHTML = ICONS.gear;
-  $('gear').setAttribute('aria-label', t('manage'));
-  $('topbar').hidden = screen === 'manage' || !units.length;
+      <span class="tile-dot"><span class="dot ${dot}" role="img" aria-label="${escape(standing)}"></span></span>
+      <span class="tile-body"><span class="tile-name">${escape(displayName(u))}</span>${
+        u.online && u.power ? `<span class="tile-temp ${known}">${fmt(u.presetTemp)}°</span>` : ''}</span>
+    </button>`;
+}
+
+const gearButton = () => `<button class="gear" data-manage aria-label="${t('manage')}">${ICONS.gear}</button>`;
+
+/**
+ * The tiles in rows of `columns`, the gear ending the last row. Two columns, or one when a
+ * word of a name would not fit a tile: names wrap, but never inside a word.
+ */
+function renderTiles() {
+  const nav = $('units');
+  nav.hidden = screen === 'manage' || units.length < 2;
+  if (nav.hidden) return;
+  for (const columns of [2, 1]) {
+    const rows = [];
+    for (let i = 0; i < units.length; i += columns) rows.push(units.slice(i, i + columns));
+    nav.innerHTML = rows.map((row, r) => `<div class="tile-row">${row.map(tile).join('')}${
+      r < rows.length - 1 ? ''
+        : row.length < columns ? '<span class="gear-cell"></span>'.repeat(columns - row.length - 1) + `<span class="gear-cell">${gearButton()}</span>`
+        : gearButton()}</div>`).join('');
+    if (![...nav.querySelectorAll('.tile-name')].some(overflows)) return;
+  }
+}
+
+function render() {
+  renderTiles();
 
   const u = unit();
   if (screen === 'manage' || !u) return renderManage();
@@ -180,6 +230,7 @@ function render() {
     <section class="card naming">
       <h2>${t('nameThisUnit')}</h2>
       <p class="hint">${t('nameHint')}</p>
+      <p class="ident">${escape(u.host)} · ${t('mac', { mac: macLabel(u.airconId) })}</p>
       <form class="field" id="nameForm">
         <input type="text" id="nameInput" maxlength="40" placeholder="${t('namePlaceholder')}" autocomplete="off">
         <button class="btn primary">${t('save')}</button>
@@ -193,6 +244,7 @@ function render() {
           <div class="name"><span>${escape(displayName(u))}</span><button class="rename" id="rename" aria-label="${t('rename')}">${ICONS.edit}</button></div>
           <div class="climate">${climate}</div>
         </div>
+        ${units.length < 2 ? gearButton() : ''}
         <button class="power ${u.power ? 'on' : ''}" id="power" ${off ? 'disabled' : ''} aria-label="${u.power ? t('turnOff') : t('turnOn')}" aria-pressed="${!!u.power}">${ICONS.power}</button>
       </div>
 
@@ -209,6 +261,7 @@ function render() {
       ${u.online && u.mode !== 'cool' && u.mode !== 'heat' ? `<p class="other-mode">${t('currentMode', { mode: t(u.mode) })}</p>` : ''}
     </section>
 
+
     <section class="card">
       <h2>${t('autoOff')}</h2>
       ${timerFailed}
@@ -219,6 +272,14 @@ function render() {
         </div>` : u.power ? `
         <div class="chips">${TIMER_MINUTES.map((min) => `<button data-min="${min}" ${off ? 'disabled' : ''}>${timerLabel(min)}</button>`).join('')}</div>` : `
         <p class="hint">${t('turnOnForTimer')}</p>`}
+    </section>
+
+    <section class="card airflow">
+      <h2>${t('airflow')}</h2>
+      <h3>${t('fanSpeed')}</h3>
+      <div class="seg" id="fan">${FAN_SPEEDS.map((f) => `<button data-fan="${f}" aria-pressed="${u.fanSpeed === f}" ${off ? 'disabled' : ''}>${fanLabel(f)}</button>`).join('')}</div>
+      <h3>${t('vane')}</h3>
+      <div class="seg" id="vane">${VANES.map((v) => `<button data-vane="${v}" aria-pressed="${u.vane === v}" ${off ? 'disabled' : ''}>${vaneLabel(v)}</button>`).join('')}</div>
     </section>`;
 
   $('rename').onclick = () => rename(u);
@@ -233,6 +294,14 @@ function render() {
   document.querySelectorAll('.modes button').forEach((b) => b.onclick = () => {
     if (u.mode !== b.dataset.mode) change({ mode: b.dataset.mode }, t(b.dataset.mode));
   });
+  document.querySelectorAll('[data-fan]').forEach((b) => b.onclick = () => {
+    const f = parseSetting(b.dataset.fan);
+    if (u.fanSpeed !== f) change({ fanSpeed: f }, `${t('fanSpeed')}: ${fanLabel(f)}`);
+  });
+  document.querySelectorAll('[data-vane]').forEach((b) => b.onclick = () => {
+    const v = parseSetting(b.dataset.vane);
+    if (u.vane !== v) change({ vane: v }, `${t('vane')}: ${vaneLabel(v)}`);
+  });
   document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer(Number(b.dataset.min)));
   if ($('cancel')) $('cancel').onclick = () => timer(null);
   fitColumns(document.querySelector('.modes'), 2);
@@ -246,11 +315,17 @@ function renderManage() {
       ${units.length ? `<button class="btn" id="done">${t('done')}</button>` : ''}
     </div>
     <section class="card">
-      ${units.length ? units.map((u) => `
+      ${units.length ? units.map((u, i) => `
         <div class="row">
-          <div class="info"><b>${escape(displayName(u))}</b><small>${u.host} · ${u.online ? t('online') : t('unreachable')}</small></div>
-          <button class="btn" data-rename="${u.airconId}">${t('rename')}</button>
-          <button class="btn danger" data-forget="${u.airconId}">${t('forget')}</button>
+          <div class="info"><b>${escape(displayName(u))}</b><small>${u.host} · ${u.online ? t('online') : t('unreachable')}</small><small>${t('mac', { mac: macLabel(u.airconId) })}</small></div>
+          ${units.length > 1 ? `<div class="move">
+            <button class="round" data-move="${u.airconId}" data-by="-1" aria-label="${escape(t('moveUp', { name: displayName(u) }))}" ${i === 0 ? 'disabled' : ''}>${ICONS.up}</button>
+            <button class="round" data-move="${u.airconId}" data-by="1" aria-label="${escape(t('moveDown', { name: displayName(u) }))}" ${i === units.length - 1 ? 'disabled' : ''}>${ICONS.down}</button>
+          </div>` : ''}
+          <div class="actions">
+            <button class="btn" data-rename="${u.airconId}">${t('rename')}</button>
+            <button class="btn danger" data-forget="${u.airconId}">${t('forget')}</button>
+          </div>
         </div>`).join('') : `<p class="hint">${t('noUnits')}</p>`}
       <div class="field"><button class="btn primary" id="scan">${t('searchNetwork')}</button></div>
     </section>
@@ -289,6 +364,21 @@ function renderManage() {
       setStatus(errorText(e), true);
     }
   };
+  document.querySelectorAll('[data-move]').forEach((b) => b.onclick = async () => {
+    const order = units.map((u) => u.airconId);
+    const from = order.indexOf(b.dataset.move);
+    const to = from + Number(b.dataset.by);
+    if (from < 0 || to < 0 || to >= order.length) return;
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    try {
+      units = await api('PUT', '/api/units/order', { order });
+      render();
+      // Keep the focus on the moved unit's arrow, so moving it further is another press.
+      document.querySelector(`[data-move="${b.dataset.move}"][data-by="${b.dataset.by}"]:not(:disabled)`)?.focus();
+    } catch (e) {
+      setStatus(errorText(e), true);
+    }
+  });
   document.querySelectorAll('[data-rename]').forEach((b) => b.onclick = () => rename(units.find((u) => u.airconId === b.dataset.rename)));
   document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = async () => {
     const u = units.find((x) => x.airconId === b.dataset.forget);
@@ -304,8 +394,12 @@ function renderManage() {
   });
 }
 
-$('gear').onclick = () => { screen = 'manage'; render(); };
+// The gear is drawn with the tiles, or on the unit card when there is only one unit.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-manage]')) { screen = 'manage'; render(); }
+});
 addEventListener('resize', () => {
+  renderTiles();
   fitColumns(document.querySelector('.modes'), 2);
   fitColumns(document.querySelector('.chips'), 4);
 });

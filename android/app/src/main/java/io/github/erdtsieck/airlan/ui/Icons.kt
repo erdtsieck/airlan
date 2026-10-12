@@ -31,6 +31,8 @@ object AirIcons {
         "M12 7.8a4.2 4.2 0 1 0 0 8.4a4.2 4.2 0 1 0 0-8.4z",
         "M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8",
     )
+    val up = stroke(2f, "M6 15l6-6l6 6")
+    val down = stroke(2f, "M6 9l6 6l6-6")
     val edit = stroke(2f, "M4 20h4L19 9l-4-4L4 16z")
     val gear = stroke(
         2f,

@@ -29,6 +29,17 @@ data class StoredUnit(
 )
 
 /**
+ * The unit's MAC address as people see it printed (E8:16:56:C0:9E:49), to tell units apart
+ * before they have names. A real unit's airconId is its MAC address; anything else is shown as is.
+ */
+val StoredUnit.macLabel: String
+    get() = if (airconId.length == 12 && airconId.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+        airconId.uppercase().chunked(2).joinToString(":")
+    } else {
+        airconId
+    }
+
+/**
  * A pending switch-off, retries included. This is the single source of truth for the unit's
  * alarm: Android can drop alarms (reboot, update, a revoked exact-alarm permission), so the
  * alarm is always derived from this, never the other way round.

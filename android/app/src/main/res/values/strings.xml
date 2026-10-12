@@ -14,6 +14,8 @@
     <string name="needs_permission">Needs permission</string>
     <string name="set">set</string>
     <string name="off">off</string>
+    <string name="tile_off">Off</string>
+    <string name="tile_on">On, %1$s</string>
     <string name="colder">Colder</string>
     <string name="warmer">Warmer</string>
     <string name="turn_on">Turn on</string>
@@ -22,6 +24,12 @@
     <string name="rename_title">Name of this unit</string>
     <string name="current_mode">Current mode: %1$s</string>
     <string name="auto_off">Auto off</string>
+    <string name="airflow">Airflow</string>
+    <string name="fan_speed">Fan speed</string>
+    <string name="fan_auto">Auto</string>
+    <!-- The up/down vane: swinging or a fixed position 1–4. -->
+    <string name="vane">Up/down direction</string>
+    <string name="swing">Swing</string>
     <string name="off_at">Switches off at %1$s</string>
     <string name="cancel">Cancel</string>
     <string name="turn_on_for_timer">Turn the unit on to pick a switch-off time.</string>
@@ -33,6 +41,10 @@
     <string name="new_unit">New unit %1$d</string>
     <string name="name_this_unit">New air conditioner found</string>
     <string name="name_hint">Not sure which one this is? Switch it on and listen which unit starts.</string>
+    <!-- The Wi-Fi module's MAC address, which is also printed on the module. -->
+    <string name="unit_mac">MAC&#160;%1$s</string>
+    <string name="move_up">Move %1$s up</string>
+    <string name="move_down">Move %1$s down</string>
     <string name="name_placeholder">e.g. Living room</string>
     <string name="save">Save</string>
     <string name="manage">Manage units</string>

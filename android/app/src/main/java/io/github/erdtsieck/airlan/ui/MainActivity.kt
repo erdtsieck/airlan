@@ -120,6 +120,7 @@ private fun App(vm: MainViewModel) {
             onAdd = vm::add,
             onDemo = vm::addDemo,
             onRename = vm::rename,
+            onMove = vm::move,
             onForget = vm::forget,
         )
         else -> UnitScreen(
@@ -129,6 +130,8 @@ private fun App(vm: MainViewModel) {
             onManage = { vm.showManage(true) },
             onPower = vm::setPower,
             onMode = vm::setMode,
+            onFanSpeed = vm::setFanSpeed,
+            onVane = vm::setVane,
             onNudge = vm::nudgeTemp,
             onTimer = { minutes ->
                 if (AlarmTimerScheduler.canScheduleExact(context)) startTimer(minutes) else exactAlarmAsk = minutes

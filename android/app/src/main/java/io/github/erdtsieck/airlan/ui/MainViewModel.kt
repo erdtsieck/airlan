@@ -93,8 +93,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         ui.update { it.copy(onLocalNetwork = Discovery.onLocalNetwork(app)) }
         if (ui.value.busy) return
         val units = repo.units.value.units
-        val results = units.map { u -> viewModelScope.async { u.airconId to runCatching { repo.state(u.airconId) } } }.awaitAll()
-        live.update { old -> old + results }
+        // Each unit shows as soon as it answers: one out of reach (which takes until its timeout)
+        // must not keep the others waiting.
+        units.map { u ->
+            viewModelScope.async {
+                val result = runCatching { repo.state(u.airconId) }
+                live.update { it + (u.airconId to result) }
+            }
+        }.awaitAll()
         // The status line belongs to the last user action; polling leaves it alone.
         ui.update { it.copy(loaded = true) }
         viewModelScope.launch { repo.migrateAccounts() }
@@ -169,6 +175,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun move(airconId: String, by: Int) = viewModelScope.launch { repo.move(airconId, by) }
+
     fun forget(airconId: String) = viewModelScope.launch {
         live.update { it - airconId }
         repo.forget(airconId)
@@ -193,6 +201,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setPower(on: Boolean) = write { it.copy(power = on) }
 
     fun setMode(mode: Mode) = write { it.copy(mode = mode) }
+
+    /** [airFlow] 0 is auto, 1–4 the manual steps. */
+    fun setFanSpeed(airFlow: Int) = write { it.copy(airFlow = airFlow) }
+
+    /** [windUD] 0 is swing, 1–4 a fixed position of the up/down vane (1 at the top). */
+    fun setVane(windUD: Int) = write { it.copy(windUD = windUD) }
 
     /** The module wants to be addressed calmly: only send once the taps have stopped. */
     fun nudgeTemp(delta: Double) {

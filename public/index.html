@@ -31,10 +31,24 @@
   button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
 
-  .units { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px; scrollbar-width: none; }
-  .units button { flex: 0 0 auto; padding: 8px 14px; border-radius: 999px; background: var(--card);
-    border: 1px solid var(--line); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-  .units button[aria-selected="true"] { border-color: var(--text); font-weight: 600; }
+  /* Every unit at a glance: compact tiles, a dot for how each stands, the gear closing the grid. */
+  .units { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .tile-row { display: flex; gap: 8px; align-items: stretch; }
+  .tile-row > button[role="tab"] { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px 12px; border-radius: 12px; background: var(--card);
+    border: 1px solid var(--line); display: flex; align-items: flex-start; gap: 8px; text-align: left; }
+  .tile-row > button[aria-selected="true"] { border: 2px solid var(--text); padding: 7px 11px; background: color-mix(in srgb, var(--line) 50%, var(--card)); }
+  .tile-row > .gear-cell { flex: 1 1 0; display: flex; justify-content: flex-end; align-items: center; }
+  .tile-row .gear { width: 44px; height: 44px; align-self: center; }
+  /* The dot sits beside the name's first line; the temperature goes below the name when they do not fit together. */
+  .tile-dot { flex: 0 0 auto; height: 20px; display: flex; align-items: center; }
+  .tile-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 6px; line-height: 20px; }
+  .tile-name { flex: 1 0 auto; max-width: 100%; font-weight: 550; font-size: 15px; }
+  .tile-temp { margin-left: auto; font-size: 14px; font-weight: 550; white-space: nowrap; }
+  .tile-temp.cool { color: var(--cool); } .tile-temp.heat { color: var(--heat); }
+  .tile-dot .dot { width: 10px; height: 10px; box-sizing: border-box; }
+  .dot.on.cool { background: var(--cool); } .dot.on.heat { background: var(--heat); } .dot.on.other { background: var(--text); }
+  .dot.unreachable { background: none; border: 1.5px solid var(--danger); }
+  .dot.loading { background: none; border: 1.5px solid var(--off); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
   .dot.cool { background: var(--cool); } .dot.heat { background: var(--heat); }
 
@@ -61,12 +75,18 @@
   .modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
   .modes button { padding: 14px; border-radius: 14px; border: 1px solid var(--line); display: flex;
     align-items: center; justify-content: center; gap: 8px; font-weight: 550; white-space: nowrap; }
-  .modes button svg { width: 20px; height: 20px; }
+  .modes button svg { flex: 0 0 auto; width: 20px; height: 20px; }  /* never squeezed away: then the labels overflow and the buttons stack */
   .modes button[aria-pressed="true"][data-mode="cool"] { background: var(--cool); border-color: var(--cool); color: #fff; }
   .modes button[aria-pressed="true"][data-mode="heat"] { background: var(--heat); border-color: var(--heat); color: #fff; }
   .other-mode { text-align: center; color: var(--muted); font-size: 13px; margin-top: 8px; }
 
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  .airflow h3 { font-size: 14px; font-weight: 500; color: var(--muted); margin: 16px 0 8px; }
+  .airflow h2 + h3 { margin-top: 0; }
+  /* Equal buttons, but a longer label (Auto, Swing) takes the width it needs; wraps only when nothing fits. */
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { flex: 1 1 0; min-width: max-content; padding: 10px 12px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
   .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
   .chips button { padding: 10px 6px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   .chips button:active:not(:disabled) { background: var(--line); }
@@ -79,8 +99,6 @@
   .status { min-height: 20px; text-align: center; font-size: 14px; color: var(--muted); }
   .status.error, .hint.error { color: var(--danger); }
   .hint.error { margin-bottom: 10px; }
-  .topbar { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; }
-  .topbar .units { flex: 1; margin-bottom: 0; }
   .gear { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--card);
     display: grid; place-items: center; color: var(--muted); }
   .gear svg { width: 20px; height: 20px; }
@@ -92,21 +110,24 @@
   .field { display: flex; gap: 8px; margin-top: 12px; }
   .field .btn { flex: 0 0 auto; }
   .naming { border-color: var(--cool); }
+  /* Name and arrows on one line; the buttons beside them when there is room, else below. */
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .row .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .row:first-of-type { border-top: 0; }
   .row .info { flex: 1 1 10em; min-width: 0; }
   .row .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .info small { color: var(--muted); }
+  .row .info small { color: var(--muted); display: block; }
+  .row .move { display: flex; gap: 4px; }
+  .round { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; }
+  .round svg { width: 20px; height: 20px; }
+  .ident { margin: 8px 0 0; font-size: 14px; }
   .manage-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
   .manage-head h1 { font-size: 22px; margin: 0; }
 </style>
 </head>
 <body>
 <main>
-  <div class="topbar" id="topbar" hidden>
-    <nav class="units" role="tablist" id="units"></nav>
-    <button class="gear" id="gear"></button>
-  </div>
+  <nav class="units" role="tablist" id="units" hidden></nav>
   <div id="view"></div>
   <p class="status" id="status" role="status"></p>
 </main>

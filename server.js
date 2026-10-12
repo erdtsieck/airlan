@@ -13,6 +13,7 @@ import { WfRacClient, WfRacError, MODE_NAMES, PORT as WFRAC_PORT } from './wfrac
 import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
 import { browse } from './mdns.js';
 import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from './timer-policy.js';
+import { reorder } from './unit-order.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = join(process.env.AIRLAN_DATA_DIR ?? join(ROOT, 'data'), 'state.json');
@@ -274,6 +275,18 @@ function parseChange(body) {
     if (!(t >= TEMP_MIN && t <= TEMP_MAX)) throw new HttpError(400, 'invalid', `presetTemp must be between ${TEMP_MIN} and ${TEMP_MAX}`);
     change.presetTemp = t;
   }
+  if ('fanSpeed' in body) {
+    // 'auto' or a manual step 1–4 (airFlow 0 is auto).
+    const f = body.fanSpeed === 'auto' ? 0 : [1, 2, 3, 4].includes(body.fanSpeed) ? body.fanSpeed : -1;
+    if (f < 0) throw new HttpError(400, 'invalid', 'fanSpeed must be "auto" or 1–4');
+    change.airFlow = f;
+  }
+  if ('vane' in body) {
+    // The up/down vane: 'swing' or a fixed position 1 (top) – 4 (bottom) (windUD 0 is swing).
+    const v = body.vane === 'swing' ? 0 : [1, 2, 3, 4].includes(body.vane) ? body.vane : -1;
+    if (v < 0) throw new HttpError(400, 'invalid', 'vane must be "swing" or 1–4');
+    change.windUD = v;
+  }
   return change;
 }
 
@@ -319,6 +332,8 @@ async function unitView(unit) {
       power: state.power,
       mode: MODE_NAMES[state.mode] ?? 'unknown',
       presetTemp: state.presetTemp,
+      fanSpeed: state.airFlow === 0 ? 'auto' : state.airFlow > 0 ? state.airFlow : null,
+      vane: state.windUD === 0 ? 'swing' : state.windUD > 0 ? state.windUD : null,
       indoorTemp: state.indoorTemp,
       outdoorTemp: state.outdoorTemp,
       errorCode: state.errorCode,
@@ -392,6 +407,14 @@ async function route(req, res) {
     await saveStore();
     const warning = await registerWarning(unit);
     return send(200, { ...(await unitView(unit)), ...(warning && { warning }) });
+  }
+
+  if (pathname === '/api/units/order' && req.method === 'PUT') {
+    const { order } = await readJson(req);
+    if (!Array.isArray(order)) throw new HttpError(400, 'invalid', 'order must be an array of unit ids');
+    store.units = reorder(store.units, order.map(String));
+    await saveStore();
+    return send(200, await Promise.all(store.units.map(unitView)));
   }
 
   const m = pathname.match(/^\/api\/units\/([0-9a-f]{12})(\/timer)?$/);

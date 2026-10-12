@@ -289,6 +289,11 @@ class Repository(
         store.updateUnit(airconId) { it.copy(name = trimmed) }
     }
 
+    /** Moves a unit [by] places in the list (negative: towards the start); the tabs follow this order. */
+    suspend fun move(airconId: String, by: Int) {
+        store.update { s -> s.copy(units = moved(s.units, airconId, by)) }
+    }
+
     /** Forgets a unit. Its account stays: it is shared with every other AirLAN client of the unit. */
     suspend fun forget(airconId: String) {
         timers.cancel(airconId)
@@ -405,6 +410,15 @@ class Repository(
         const val TIMER_GIVE_UP_MS = 75 * 60_000L
 
         /** The wait before the next attempt after [failed] failed attempts (1, 2, ...): 30 s, 1, 2, 4, then 5 min. */
+        /** [units] with [airconId] moved [by] places, clamped to the ends; unchanged if it is not there. */
+        fun moved(units: List<StoredUnit>, airconId: String, by: Int): List<StoredUnit> {
+            val from = units.indexOfFirst { it.airconId == airconId }
+            if (from < 0) return units
+            val to = (from + by).coerceIn(0, units.lastIndex)
+            if (to == from) return units
+            return units.toMutableList().apply { add(to, removeAt(from)) }
+        }
+
         fun timerRetryDelayMs(failed: Int): Long = minOf(5 * 60_000L, 30_000L shl (failed - 1).coerceIn(0, 4))
 
         /** A user's write waits this long for another client's write lock to lapse. */
