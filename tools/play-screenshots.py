@@ -42,7 +42,8 @@ def sh(cmd):
 
 def ui():
     sh("uiautomator dump /sdcard/ui.xml")
-    return adb("shell", "cat", "/sdcard/ui.xml")
+    # The dump fails now and then while the app is starting; the callers retry.
+    return adb("shell", "cat", "/sdcard/ui.xml", check=False)
 
 
 def tap_text(text, timeout=30):

@@ -14,6 +14,7 @@
     <string name="set">ingesteld</string>
     <string name="off">uit</string>
     <string name="tile_off">Uit</string>
+    <string name="tile_on">Aan, %1$s</string>
     <string name="colder">Kouder</string>
     <string name="warmer">Warmer</string>
     <string name="turn_on">Aanzetten</string>
@@ -23,13 +24,10 @@
     <string name="current_mode">Huidige stand: %1$s</string>
     <string name="auto_off">Automatisch uit</string>
     <string name="airflow">Luchtstroom</string>
-    <string name="airflow_summary">ventilator %1$s · richting %2$s</string>
     <string name="fan_speed">Ventilator</string>
     <string name="fan_auto">Auto</string>
     <string name="vane">Richting op/neer</string>
     <string name="swing">Zwenken</string>
-    <string name="expanded">Uitgeklapt</string>
-    <string name="collapsed">Ingeklapt</string>
     <string name="off_at">Gaat uit om %1$s</string>
     <string name="cancel">Annuleren</string>
     <string name="turn_on_for_timer">Zet de airco aan om een uitschakeltijd te kiezen.</string>

@@ -17,7 +17,7 @@ Wat je per airco kunt doen:
 • Kiezen tussen koelen en verwarmen
 • De temperatuur instellen in halve graden
 • Hem automatisch laten uitgaan na 15 of 30 minuten of 1 tot 6 uur
-• Ventilatorsnelheid en richting op/neer, weggestopt tot je ze nodig hebt
+• De ventilatorsnelheid en de richting op/neer instellen
 
 Met meerdere airco's zie je aan een tegel per airco in één oogopslag welke aanstaan.
 

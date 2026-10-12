@@ -55,8 +55,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
@@ -80,6 +87,7 @@ private val TIMER_MINUTES = listOf(15, 30, 60, 120, 180, 240, 300, 360)
 
 private val GAP = 8.dp
 private val CHIP_PADDING = 8.dp
+private val MODE_PADDING = 8.dp
 
 /**
  * Equal buttons side by side, [maxColumns] to a row, or fewer when the longest label would
@@ -280,7 +288,6 @@ fun UnitScreen(
     onMode: (Mode) -> Unit,
     onFanSpeed: (Int) -> Unit,
     onVane: (Int) -> Unit,
-    onAirflowOpen: (Boolean) -> Unit,
     onNudge: (Double) -> Unit,
     onTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
@@ -292,13 +299,11 @@ fun UnitScreen(
     val disabled = s == null || state.busy
     var renaming by remember { mutableStateOf(false) }
 
-    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.app_name), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f))
-        RoundButton(AirIcons.gear, stringResource(R.string.manage), onManage, 40.dp, enabled = true)
-    }
-    // Every unit at a glance, each tile saying whether it runs: a grid rather than a row of
-    // tabs, which hides units once there are more than fit.
-    if (state.units.size > 1) UnitTiles(state, unit.stored.airconId, onSelect)
+    // Every unit at a glance, each tile saying whether it runs: a compact grid rather than a
+    // row of tabs, which hides units once there are more than fit. The gear closes the grid;
+    // with a single unit it sits on the unit card instead.
+    val single = state.units.size <= 1
+    if (!single) UnitTiles(state, unit.stored.airconId, onSelect, onManage)
 
     if (!state.onLocalNetwork) Card(accent = c.heat) { Hint(stringResource(R.string.home_network_only)) }
     if (unit.needsPermission) NetworkPermissionCard(permission)
@@ -349,6 +354,11 @@ fun UnitScreen(
                         tint = c.muted,
                         modifier = Modifier.padding(start = 4.dp).size(28.dp).clip(CircleShape).clickable { renaming = true }.padding(6.dp),
                     )
+                    if (single) {
+                        Spacer(Modifier.weight(1f))
+                        RoundButton(AirIcons.gear, stringResource(R.string.manage), onManage, 36.dp, enabled = true)
+                        Spacer(Modifier.width(8.dp))
+                    }
                 }
                 val climate = if (s == null) stringResource(unit.availability)
                 else listOfNotNull(
@@ -383,8 +393,9 @@ fun UnitScreen(
 
         val modes = listOf(Triple(Mode.COOL, AirIcons.cool, c.cool), Triple(Mode.HEAT, AirIcons.heat, c.heat))
         val modeLabels = modes.map { modeName(it.first) }
-        // Padding, icon and the gap after it, border: see Pill.
-        FittingGrid(modeLabels, maxColumns = 2, chrome = 14.dp * 2 + 20.dp + 8.dp + 2.dp, Modifier.padding(top = 12.dp)) { i, modifier ->
+        // Padding, icon and the gap after it, border: see Pill. The padding is kept tight: at
+        // 360dp and font 1.0 the longer label with its icon must still fit beside the other.
+        FittingGrid(modeLabels, maxColumns = 2, chrome = MODE_PADDING * 2 + 20.dp + 8.dp + 2.dp, Modifier.padding(top = 12.dp)) { i, modifier ->
             val (mode, icon, color) = modes[i]
             Pill(
                 modeLabels[i],
@@ -394,14 +405,13 @@ fun UnitScreen(
                 filled = if (s?.mode == mode) color else null,
                 icon = icon,
                 shape = RoundedCornerShape(14.dp),
+                horizontalPadding = MODE_PADDING,
             )
         }
         if (s != null && s.mode != Mode.COOL && s.mode != Mode.HEAT) {
             Text(stringResource(R.string.current_mode, modeName(s.mode)), color = c.muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         }
     }
-
-    AirflowCard(state.airflowOpen, s?.airFlow, s?.windUD, enabled = !disabled, onAirflowOpen, onFanSpeed, onVane)
 
     Card {
         Heading(stringResource(R.string.auto_off))
@@ -440,6 +450,8 @@ fun UnitScreen(
         }
     }
 
+    AirflowCard(s?.airFlow, s?.windUD, enabled = !disabled, onFanSpeed, onVane)
+
     StatusLine(state.status ?: unit.error?.let { Status(it, isError = true) })
 
     if (renaming) {
@@ -451,64 +463,173 @@ fun UnitScreen(
 }
 
 @Composable
-private fun UnitTiles(state: UiState, selectedId: String, onSelect: (String) -> Unit) {
+private fun UnitTiles(state: UiState, selectedId: String, onSelect: (String) -> Unit, onManage: () -> Unit) {
+    // A name may wrap, but never inside a word: one column when a word does not fit a tile.
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val style = tileNameStyle()
+    val longestWord = state.units.flatMap { displayName(state, it).split(' ') }
+        .maxOf { with(density) { measurer.measure(it, style, maxLines = 1).size.width.toDp() } }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-        val columns = if (maxWidth >= 600.dp) 3 else 2
+        val wanted = if (maxWidth >= 600.dp) 3 else 2
+        val columns = (wanted downTo 1).first { n -> n == 1 || (maxWidth - GAP * (n - 1)) / n - TILE_CHROME >= longestWord }
+        val rows = state.units.chunked(columns)
         Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
-            state.units.chunked(columns).forEach { row ->
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(GAP)) {
-                    row.forEach { u -> UnitTile(state, u, u.stored.airconId == selectedId, Modifier.weight(1f).fillMaxHeight()) { onSelect(u.stored.airconId) } }
-                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            rows.forEachIndexed { r, row ->
+                val last = r == rows.lastIndex
+                Row(
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(GAP),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    row.forEach { u ->
+                        UnitTile(state, u, u.stored.airconId == selectedId, Modifier.weight(1f).fillMaxHeight()) { onSelect(u.stored.airconId) }
+                    }
+                    // The gear ends the last row: in an empty cell when there is one, else
+                    // beside the tiles, which then give up its width.
+                    if (last) {
+                        if (row.size < columns) {
+                            repeat(columns - row.size - 1) { Spacer(Modifier.weight(1f)) }
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { GearButton(onManage) }
+                        } else {
+                            GearButton(onManage)
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/** A unit's name and how it stands: on (set temperature and mode), off, or out of reach. */
+private val TILE_HEIGHT = 44.dp
+
+@Composable
+private fun GearButton(onManage: () -> Unit) = RoundButton(AirIcons.gear, stringResource(R.string.manage), onManage, TILE_HEIGHT, enabled = true)
+
+/**
+ * A unit's name with a dot for how it stands (filled in the mode's colour: on; grey: off;
+ * hollow red: out of reach) and, when on, its set temperature. Nothing is cut off: the name
+ * wraps, and the temperature goes below it when the two do not fit on one line.
+ */
 @Composable
 private fun UnitTile(state: UiState, u: UnitUi, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = LocalAirColors.current
     val s = u.state
+    val on = s?.power == true
     val color = when {
-        s?.power != true -> c.off
+        !on -> c.off
         s.mode == Mode.HEAT -> c.heat
         s.mode == Mode.COOL -> c.cool
         else -> c.text
     }
-    val shape = RoundedCornerShape(14.dp)
-    Column(
+    val unreachable = s == null && (u.error != null || u.needsPermission)
+    val standing = when {
+        on -> stringResource(R.string.tile_on, modeName(s.mode))
+        s != null -> stringResource(R.string.tile_off)
+        unreachable -> stringResource(u.availability)
+        else -> ""
+    }
+    val shape = RoundedCornerShape(12.dp)
+    Box(
         modifier
-            .heightIn(min = 60.dp)
+            .heightIn(min = TILE_HEIGHT)
             .clip(shape)
             .background(if (selected) c.line.copy(alpha = 0.5f) else c.card)
             .border(if (selected) 2.dp else 1.dp, if (selected) c.text else c.line, shape)
             .clickable(role = Role.Tab, onClick = onClick)
             .semantics { this.selected = selected }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.Center,
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Text(displayName(state, u), color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(if (s == null) Color.Transparent else color).border(1.dp, if (s == null) c.off else color, CircleShape))
-            Spacer(Modifier.width(6.dp))
-            when {
-                s?.power == true -> {
-                    Text(fmt(s.presetTemp) + "°", color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    val icon = when (s.mode) {
-                        Mode.HEAT -> AirIcons.heat
-                        Mode.COOL -> AirIcons.cool
-                        else -> null
-                    }
-                    if (icon != null) Icon(icon, modeName(s.mode), tint = color, modifier = Modifier.padding(start = 4.dp).size(14.dp))
-                    else Text(" " + modeName(s.mode), color = color, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                s != null -> Text(stringResource(R.string.tile_off), color = c.muted, fontSize = 14.sp)
-                u.error != null || u.needsPermission -> Text(stringResource(u.availability), color = c.danger.copy(alpha = 0.8f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                else -> Text("–", color = c.muted, fontSize = 14.sp)
+        val name = displayName(state, u)
+        val nameStyle = tileNameStyle()
+        val tempStyle = nameStyle.copy(fontSize = 14.sp)
+        val temp = if (on) fmt(s.presetTemp) + "°" else null
+        Row(verticalAlignment = Alignment.Top) {
+            // As tall as the name's first line, so the dot sits beside it.
+            Box(Modifier.height(with(LocalDensity.current) { TILE_LINE.toDp() }), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(if (s != null) color else Color.Transparent)
+                        .border(1.5.dp, if (unreachable) c.danger else if (s != null) color else c.off, CircleShape)
+                        .semantics { contentDescription = standing },
+                )
             }
+            Spacer(Modifier.width(8.dp))
+            NameAndTemperature(name, nameStyle, temp, tempStyle, color, Modifier.weight(1f))
         }
     }
+}
+
+private val TILE_LINE = 20.sp
+
+/** What a tile adds around the name: padding, the dot and its gap, the border. */
+private val TILE_CHROME = 12.dp * 2 + 10.dp + 8.dp + 2.dp * 2
+
+@Composable
+private fun tileNameStyle() = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = TILE_LINE)
+
+/**
+ * The name with the temperature at the end of its first line, or, when the two do not fit
+ * side by side, the temperature on a line of its own below the name. A layout of its own
+ * rather than BoxWithConstraints: the tile rows ask for intrinsic sizes, which that cannot give.
+ */
+@Composable
+private fun NameAndTemperature(name: String, nameStyle: TextStyle, temp: String?, tempStyle: TextStyle, tempColor: Color, modifier: Modifier) {
+    val c = LocalAirColors.current
+    Layout(
+        content = {
+            Text(name, color = c.text, style = nameStyle)
+            if (temp != null) Text(temp, color = tempColor, style = tempStyle, maxLines = 1)
+        },
+        modifier = modifier,
+        measurePolicy = NameAndTemperaturePolicy,
+    )
+}
+
+/** Measures [NameAndTemperature]; with intrinsics of its own, as the tile rows ask for them. */
+private object NameAndTemperaturePolicy : MeasurePolicy {
+    private const val GAP_DP = 6
+
+    /** Whether the temperature fits beside the name in [width], and the width the name gets. */
+    private fun IntrinsicMeasureScope.split(measurables: List<IntrinsicMeasurable>, width: Int): Pair<Boolean, Int> {
+        val temp = measurables.getOrNull(1)?.let { it.maxIntrinsicWidth(Constraints.Infinity) + GAP_DP.dp.roundToPx() } ?: 0
+        val beside = measurables[0].maxIntrinsicWidth(Constraints.Infinity) + temp <= width
+        return beside to if (beside) width - temp else width
+    }
+
+    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
+        val tempPlaceable = measurables.getOrNull(1)?.measure(Constraints())
+        val natural = measurables[0].maxIntrinsicWidth(Constraints.Infinity) + (tempPlaceable?.let { it.width + GAP_DP.dp.roundToPx() } ?: 0)
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else natural
+        val (beside, nameWidth) = split(measurables, width)
+        val namePlaceable = measurables[0].measure(Constraints(maxWidth = nameWidth))
+        val tempHeight = tempPlaceable?.height ?: 0
+        val height = if (beside) maxOf(namePlaceable.height, tempHeight) else namePlaceable.height + tempHeight
+        return layout(width, height) {
+            namePlaceable.place(0, 0)
+            tempPlaceable?.place(width - tempPlaceable.width, if (beside) 0 else namePlaceable.height)
+        }
+    }
+
+    private fun IntrinsicMeasureScope.height(measurables: List<IntrinsicMeasurable>, width: Int): Int {
+        val (beside, nameWidth) = split(measurables, width)
+        val name = measurables[0].minIntrinsicHeight(nameWidth)
+        val temp = measurables.getOrNull(1)?.minIntrinsicHeight(Constraints.Infinity) ?: 0
+        return if (beside) maxOf(name, temp) else name + temp
+    }
+
+    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) = height(measurables, width)
+
+    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) = height(measurables, width)
+
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
+        maxOf(measurables[0].minIntrinsicWidth(height), measurables.getOrNull(1)?.maxIntrinsicWidth(height) ?: 0)
+
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
+        measurables[0].maxIntrinsicWidth(height) + (measurables.getOrNull(1)?.let { it.maxIntrinsicWidth(height) + GAP_DP.dp.roundToPx() } ?: 0)
 }
 
 /** 0 is auto, 1–4 the manual steps. */
@@ -517,53 +638,23 @@ private val FAN_SPEEDS = listOf(0, 1, 2, 3, 4)
 /** 0 is swing, 1–4 a fixed position of the up/down vane. */
 private val VANES = listOf(0, 1, 2, 3, 4)
 
-/**
- * Fan speed and the up/down vane, in a card that opens on request: most of the time nobody
- * needs them, so the main screen stays calm. The closed card still says what they are set to.
- */
+/** Fan speed and the up/down vane: below the timer, as they are needed least. */
 @Composable
-private fun AirflowCard(
-    open: Boolean,
-    airFlow: Int?,
-    windUD: Int?,
-    enabled: Boolean,
-    onOpen: (Boolean) -> Unit,
-    onFanSpeed: (Int) -> Unit,
-    onVane: (Int) -> Unit,
-) {
-    val c = LocalAirColors.current
+private fun AirflowCard(airFlow: Int?, windUD: Int?, enabled: Boolean, onFanSpeed: (Int) -> Unit, onVane: (Int) -> Unit) {
     val fanLabels = FAN_SPEEDS.map { if (it == 0) stringResource(R.string.fan_auto) else it.toString() }
     val vaneLabels = VANES.map { if (it == 0) stringResource(R.string.swing) else it.toString() }
-    val fan = airFlow?.let { fanLabels.getOrNull(FAN_SPEEDS.indexOf(it)) }
-    val vane = windUD?.let { vaneLabels.getOrNull(VANES.indexOf(it)) }
-    val summary = if (fan != null && vane != null) stringResource(R.string.airflow_summary, fan.lowercase(), vane.lowercase()) else ""
-    val openState = stringResource(if (open) R.string.expanded else R.string.collapsed)
     Card {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(role = Role.Button) { onOpen(!open) }
-                .semantics { stateDescription = openState },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(stringResource(R.string.airflow), fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = c.text)
-            Spacer(Modifier.width(8.dp))
-            Text(summary, color = c.muted, fontSize = 14.sp, modifier = Modifier.weight(1f))
-            Icon(if (open) AirIcons.up else AirIcons.down, null, tint = c.muted, modifier = Modifier.size(20.dp))
-        }
-        if (open) {
-            SubHeading(stringResource(R.string.fan_speed))
-            Segmented(fanLabels, FAN_SPEEDS.indexOf(airFlow), enabled) { onFanSpeed(FAN_SPEEDS[it]) }
-            SubHeading(stringResource(R.string.vane))
-            Segmented(vaneLabels, VANES.indexOf(windUD), enabled) { onVane(VANES[it]) }
-        }
+        Heading(stringResource(R.string.airflow))
+        SubHeading(stringResource(R.string.fan_speed), first = true)
+        Segmented(fanLabels, FAN_SPEEDS.indexOf(airFlow), enabled) { onFanSpeed(FAN_SPEEDS[it]) }
+        SubHeading(stringResource(R.string.vane))
+        Segmented(vaneLabels, VANES.indexOf(windUD), enabled) { onVane(VANES[it]) }
     }
 }
 
 @Composable
-private fun SubHeading(text: String) =
-    Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+private fun SubHeading(text: String, first: Boolean = false) =
+    Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = if (first) 0.dp else 16.dp, bottom = 8.dp))
 
 /**
  * Options side by side, equally wide unless a label needs more (Auto, Swing); when even that

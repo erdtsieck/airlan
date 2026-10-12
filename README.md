@@ -13,11 +13,11 @@ Per unit you can:
 - choose cooling or heating
 - set the temperature (16–30 °C in 0.5° steps)
 - have it switch off automatically after 15 or 30 minutes or 1–6 hours
-- set the fan speed (auto or 1–4) and the up/down direction (swing or 1–4), tucked away in
-  a card that stays closed until you open it
+- set the fan speed (auto or 1–4) and the up/down direction (swing or 1–4), at the bottom
+  of the screen
 
 That is all, on purpose. Indoor and outdoor temperature are shown along the way, and with
-more than one unit a tile per unit shows at a glance which ones run. Both
+more than one unit a compact tile per unit shows at a glance which ones run. Both
 follow the device's language (English and Dutch so far) and light/dark theme.
 
 > AirLAN is an independent project. It is not affiliated with, endorsed by or supported by

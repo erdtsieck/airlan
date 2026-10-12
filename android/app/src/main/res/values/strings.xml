@@ -15,6 +15,7 @@
     <string name="set">set</string>
     <string name="off">off</string>
     <string name="tile_off">Off</string>
+    <string name="tile_on">On, %1$s</string>
     <string name="colder">Colder</string>
     <string name="warmer">Warmer</string>
     <string name="turn_on">Turn on</string>
@@ -24,14 +25,11 @@
     <string name="current_mode">Current mode: %1$s</string>
     <string name="auto_off">Auto off</string>
     <string name="airflow">Airflow</string>
-    <string name="airflow_summary">fan %1$s · direction %2$s</string>
     <string name="fan_speed">Fan speed</string>
     <string name="fan_auto">Auto</string>
     <!-- The up/down vane: swinging or a fixed position 1–4. -->
     <string name="vane">Up/down direction</string>
     <string name="swing">Swing</string>
-    <string name="expanded">Expanded</string>
-    <string name="collapsed">Collapsed</string>
     <string name="off_at">Switches off at %1$s</string>
     <string name="cancel">Cancel</string>
     <string name="turn_on_for_timer">Turn the unit on to pick a switch-off time.</string>

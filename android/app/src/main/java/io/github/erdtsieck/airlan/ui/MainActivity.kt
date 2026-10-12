@@ -132,7 +132,6 @@ private fun App(vm: MainViewModel) {
             onMode = vm::setMode,
             onFanSpeed = vm::setFanSpeed,
             onVane = vm::setVane,
-            onAirflowOpen = vm::setAirflowOpen,
             onNudge = vm::nudgeTemp,
             onTimer = { minutes ->
                 if (AlarmTimerScheduler.canScheduleExact(context)) startTimer(minutes) else exactAlarmAsk = minutes
