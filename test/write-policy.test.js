@@ -108,3 +108,12 @@ test('the timer retries quickly at first, then every five minutes, for 75 minute
   while (at + timerRetryDelayMs(failed + 1) <= TIMER_GIVE_UP_MS) at += timerRetryDelayMs(++failed);
   assert.ok(at >= 70 * 60e3, `last attempt at ${at / 60e3} min`);
 });
+
+test('fan speed and the up/down vane are written with the rest of the state kept', async (t) => {
+  const { unit, client } = await setup(t);
+  await client.change(ID, { power: true, presetTemp: 22 }, { timezone: 'UTC' });
+  for (const [airFlow, windUD] of [[3, 0], [0, 2], [4, 4], [1, 1]]) {
+    await client.change(ID, { airFlow, windUD }, { timezone: 'UTC' });
+    assert.deepEqual([unit.state.airFlow, unit.state.windUD, unit.state.power, unit.state.presetTemp], [airFlow, windUD, true, 22]);
+  }
+});

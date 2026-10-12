@@ -17,6 +17,9 @@ What you can do, per air conditioner:
 • Choose cooling or heating
 • Set the temperature in half degrees
 • Have it switch off automatically after 15 or 30 minutes or 1 to 6 hours
+• Fan speed and up/down direction, tucked away until you need them
+
+With several air conditioners, a tile per unit shows at a glance which ones are running.
 
 That is all, on purpose. AirLAN finds the air conditioners on your network by itself and asks you to name them. You can also add one by IP address, for example when your smart devices live on a separate network.
 

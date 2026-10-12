@@ -144,6 +144,39 @@ class RepositoryTest {
     }
 
     @Test
+    fun `moving a unit reorders the list, clamped at the ends, and survives a restart`() = runBlocking {
+        val repo = repository()
+        repo.addDemo("Demo")
+        repo.add("127.0.0.1")
+        val real = "e81656cb0d45"
+        fun order() = repository().units.value.units.map { it.airconId }
+
+        repo.move(real, -1)
+        assertEquals(listOf(real, Repository.DEMO_AIRCON_ID), order())
+        repo.move(real, -5)
+        assertEquals(listOf(real, Repository.DEMO_AIRCON_ID), order())
+        repo.move(real, 1)
+        assertEquals(listOf(Repository.DEMO_AIRCON_ID, real), order())
+        repo.move("unknown", 1)
+        assertEquals(listOf(Repository.DEMO_AIRCON_ID, real), order())
+    }
+
+    @Test
+    fun `moved keeps every unit once`() {
+        val units = listOf("a", "b", "c", "d").map { StoredUnit(it, null, "h") }
+        fun ids(l: List<StoredUnit>) = l.joinToString("") { it.airconId }
+        assertEquals("cabd", ids(Repository.moved(units, "c", -2)))
+        assertEquals("bcda", ids(Repository.moved(units, "a", 9)))
+        assertEquals("abcd", ids(Repository.moved(units, "x", 1)))
+    }
+
+    @Test
+    fun `a unit's MAC label is its airconId as printed, anything else as is`() {
+        assertEquals("E8:16:56:C0:9E:49", StoredUnit("e81656c09e49", null, "h").macLabel)
+        assertEquals("demo", StoredUnit("demo", null, "h").macLabel)
+    }
+
+    @Test
     fun `a write registers once and applies only the change`() = runBlocking {
         val repo = repository()
         repo.add("127.0.0.1")
@@ -156,6 +189,19 @@ class RepositoryTest {
         assertEquals(22.5, unit.state.presetTemp, 0.0)
         assertEquals(Codec.decode(liveFrame).windLR, unit.state.windLR)
         assertFalse("request bodies must not escape slashes", unit.sawEscapedSlash)
+    }
+
+    @Test
+    fun `fan speed and the up-down vane are written, the rest of the state kept`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        repo.apply("e81656cb0d45") { it.copy(power = true, presetTemp = 22.0) }
+        for ((airFlow, windUD) in listOf(3 to 0, 0 to 2, 4 to 4, 1 to 1)) {
+            repo.apply("e81656cb0d45") { it.copy(airFlow = airFlow, windUD = windUD) }
+            assertEquals(listOf(airFlow, windUD), listOf(unit.state.airFlow, unit.state.windUD))
+            assertTrue(unit.state.power)
+            assertEquals(22.0, unit.state.presetTemp, 0.0)
+        }
     }
 
     @Test

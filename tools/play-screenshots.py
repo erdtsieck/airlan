@@ -45,15 +45,19 @@ def ui():
     return adb("shell", "cat", "/sdcard/ui.xml")
 
 
-def tap_text(text):
+def tap_text(text, timeout=30):
+    """Taps the element with this text or description, waiting for it to appear (a first start is slow)."""
     import re
-    xml = ui()
-    for node in xml.split("<node"):
-        if f'text="{text}"' in node or f'content-desc="{text}"' in node:
-            x1, y1, x2, y2 = map(int, re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node).groups())
-            sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
-            return
-    raise SystemExit(f"not on screen: {text}")
+    deadline = time.time() + timeout
+    while True:
+        for node in ui().split("<node"):
+            if f'text="{text}"' in node or f'content-desc="{text}"' in node:
+                x1, y1, x2, y2 = map(int, re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node).groups())
+                sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
+                return
+        if time.time() > deadline:
+            raise SystemExit(f"not on screen: {text}")
+        time.sleep(1)
 
 
 def state(lang_living, lang_bed, lang_study):
@@ -70,6 +74,8 @@ def state(lang_living, lang_bed, lang_study):
     with open(path, "w") as f:
         json.dump(s, f)
     adb("push", path, "/data/local/tmp/s.json")
+    # files/ does not exist yet on a freshly installed or cleared app.
+    sh(f"run-as {PKG} mkdir -p files")
     sh(f"run-as {PKG} cp /data/local/tmp/s.json files/state.json")
 
 

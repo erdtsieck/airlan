@@ -17,6 +17,9 @@ Wat je per airco kunt doen:
 • Kiezen tussen koelen en verwarmen
 • De temperatuur instellen in halve graden
 • Hem automatisch laten uitgaan na 15 of 30 minuten of 1 tot 6 uur
+• Ventilatorsnelheid en richting op/neer, weggestopt tot je ze nodig hebt
+
+Met meerdere airco's zie je aan een tegel per airco in één oogopslag welke aanstaan.
 
 Meer niet, en dat is expres. AirLAN vindt de airco's op je netwerk zelf en vraagt je ze een naam te geven. Je kunt er ook een toevoegen op IP-adres, bijvoorbeeld als je slimme apparaten op een apart netwerk zitten.
 

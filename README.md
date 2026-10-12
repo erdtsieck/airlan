@@ -13,8 +13,11 @@ Per unit you can:
 - choose cooling or heating
 - set the temperature (16–30 °C in 0.5° steps)
 - have it switch off automatically after 15 or 30 minutes or 1–6 hours
+- set the fan speed (auto or 1–4) and the up/down direction (swing or 1–4), tucked away in
+  a card that stays closed until you open it
 
-That is all, on purpose. Indoor and outdoor temperature are shown along the way. Both
+That is all, on purpose. Indoor and outdoor temperature are shown along the way, and with
+more than one unit a tile per unit shows at a glance which ones run. Both
 follow the device's language (English and Dutch so far) and light/dark theme.
 
 > AirLAN is an independent project. It is not affiliated with, endorsed by or supported by
@@ -75,9 +78,10 @@ npm start
 Open `http://<ip-of-that-machine>:8321` on your phone and use "Add to Home screen".
 
 On first start AirLAN scans the local network for units, and the app asks you to name each
-one it finds. Not sure which unit is which? Switch it on from the app and listen. The gear
-icon opens *Manage units*: search the network again (for a new unit), add a unit by IP
-address, rename or forget one.
+one it finds. Not sure which unit is which? Switch it on from the app and listen, or match
+the MAC address shown with the one printed on the Wi-Fi module. The gear icon opens *Manage
+units*: search the network again (for a new unit), add a unit by IP address, put the units
+in the order you like, rename or forget one.
 
 Searching asks the network by mDNS (the units announce themselves as `_beaver._tcp`) and
 also probes the module's port on every address, because not every unit answers mDNS every
@@ -133,7 +137,8 @@ with your result (the firmware branch and versions are in the `getAirconStat` re
 |---|---|
 | `GET /api/units` | All units with their current state; `name` is `null` until the user names it |
 | `POST /api/units` | Body `{ "host": "192.168.1.50" }`: add the unit at that address |
-| `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `name` |
+| `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `fanSpeed` (`"auto"` or 1–4), `vane` (up/down direction: `"swing"` or 1–4, 1 at the top), `name` |
+| `PUT /api/units/order` | Body `{ "order": ["<airconId>", …] }`: the order of the units; units left out keep theirs after the named ones |
 | `DELETE /api/units/:id` | Forget the unit |
 | `PUT /api/units/:id/timer` | Body `{ "minutes": 1–360 }`: switch off after that time |
 | `DELETE /api/units/:id/timer` | Cancel the timer |

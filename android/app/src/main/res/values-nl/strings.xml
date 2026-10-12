@@ -13,6 +13,7 @@
     <string name="needs_permission">Toestemming nodig</string>
     <string name="set">ingesteld</string>
     <string name="off">uit</string>
+    <string name="tile_off">Uit</string>
     <string name="colder">Kouder</string>
     <string name="warmer">Warmer</string>
     <string name="turn_on">Aanzetten</string>
@@ -21,6 +22,14 @@
     <string name="rename_title">Naam van deze airco</string>
     <string name="current_mode">Huidige stand: %1$s</string>
     <string name="auto_off">Automatisch uit</string>
+    <string name="airflow">Luchtstroom</string>
+    <string name="airflow_summary">ventilator %1$s · richting %2$s</string>
+    <string name="fan_speed">Ventilator</string>
+    <string name="fan_auto">Auto</string>
+    <string name="vane">Richting op/neer</string>
+    <string name="swing">Zwenken</string>
+    <string name="expanded">Uitgeklapt</string>
+    <string name="collapsed">Ingeklapt</string>
     <string name="off_at">Gaat uit om %1$s</string>
     <string name="cancel">Annuleren</string>
     <string name="turn_on_for_timer">Zet de airco aan om een uitschakeltijd te kiezen.</string>
@@ -32,6 +41,9 @@
     <string name="new_unit">Nieuwe airco %1$d</string>
     <string name="name_this_unit">Nieuwe airco gevonden</string>
     <string name="name_hint">Weet je niet welke dit is? Zet hem aan en luister welke start.</string>
+    <string name="unit_mac">MAC&#160;%1$s</string>
+    <string name="move_up">%1$s omhoog</string>
+    <string name="move_down">%1$s omlaag</string>
     <string name="name_placeholder">bijv. Woonkamer</string>
     <string name="save">Opslaan</string>
     <string name="manage">Airco’s beheren</string>
