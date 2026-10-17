@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Join the beta
+    url: https://github.com/erdtsieck/airlan#beta-testing
+    about: How to install the Android beta from Google Play.
+  - name: Mitsubishi Electric units
+    url: https://github.com/erdtsieck/airlan#beta-testing
+    about: AirLAN only supports Mitsubishi Heavy Industries units with the WF-RAC module, not Mitsubishi Electric (MELCloud).
