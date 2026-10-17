@@ -50,7 +50,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -79,7 +78,6 @@ import io.github.erdtsieck.airlan.data.aimsBothVanes
 import io.github.erdtsieck.airlan.data.macLabel
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MAX
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MIN
-import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.Mode
 import java.text.DateFormat
 import java.util.Date
@@ -162,7 +160,7 @@ private fun Page(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun Card(modifier: Modifier = Modifier, accent: Color? = null, content: @Composable ColumnScope.() -> Unit) {
+internal fun Card(modifier: Modifier = Modifier, accent: Color? = null, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAirColors.current
     Column(
         modifier
@@ -276,7 +274,7 @@ private fun DemoBadge() {
 private fun Hint(text: String) = Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp)
 
 @Composable
-private fun Heading(text: String) =
+internal fun Heading(text: String) =
     Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = LocalAirColors.current.text, modifier = Modifier.padding(bottom = 8.dp))
 
 // ---------- unit screen ----------
@@ -636,91 +634,6 @@ private object NameAndTemperaturePolicy : MeasurePolicy {
     override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
         measurables[0].maxIntrinsicWidth(height) + (measurables.getOrNull(1)?.let { it.maxIntrinsicWidth(height) + GAP_DP.dp.roundToPx() } ?: 0)
 }
-
-/**
- * Fan speed and the vanes: below the timer, as they are needed least. The left/right vane and
- * 3D auto only for a unit that [aimsBothVanes]; 3D auto shows in both rows, as it aims both.
- */
-@Composable
-private fun AirflowCard(
-    s: AirconState?,
-    aimsBothVanes: Boolean,
-    enabled: Boolean,
-    onFanSpeed: (Int) -> Unit,
-    onVane: (Int) -> Unit,
-    onVaneLR: (Int) -> Unit,
-    onAuto3d: () -> Unit,
-) {
-    val auto3d = aimsBothVanes && s?.entrust == true
-    val auto3dLabel = stringResource(R.string.auto_3d)
-    Card {
-        Heading(stringResource(R.string.airflow))
-        SubHeading(stringResource(R.string.fan_speed), first = true)
-        val fan = stringArrayResource(R.array.fan_speeds).toList()
-        OptionGrid(fan, s?.airFlow ?: -1, enabled, listOf(5, 3, 2)) { onFanSpeed(it) }
-
-        SubHeading(stringResource(R.string.vane))
-        val ud = stringArrayResource(R.array.vanes_ud).toList() + if (aimsBothVanes) listOf(auto3dLabel) else emptyList()
-        val udSelected = if (auto3d) ud.lastIndex else s?.windUD ?: -1
-        OptionGrid(ud, udSelected, enabled, if (ud.size == 6) listOf(6, 3, 2) else listOf(5, 3, 2)) {
-            if (it == 5) onAuto3d() else onVane(it)
-        }
-
-        if (aimsBothVanes) {
-            SubHeading(stringResource(R.string.vane_lr))
-            val lr = stringArrayResource(R.array.vanes_lr).toList() + auto3dLabel
-            OptionGrid(lr, if (auto3d) lr.lastIndex else s?.windLR ?: -1, enabled, listOf(3, 2)) {
-                if (it == lr.lastIndex) onAuto3d() else onVaneLR(it)
-            }
-        }
-    }
-}
-
-/**
- * Equal buttons in rows, as many to a row as the first of [columns] (or 1) at which every
- * label fits. A label may wrap between words, at a space or after a hyphen (Midden-rechts),
- * never inside one, so only its longest word has to fit. Buttons in a row are equally tall.
- */
-@Composable
-private fun OptionGrid(labels: List<String>, selected: Int, enabled: Boolean, columns: List<Int>, onSelect: (Int) -> Unit) {
-    val c = LocalAirColors.current
-    val measurer = rememberTextMeasurer()
-    val style = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
-    val density = LocalDensity.current
-    val chrome = CHIP_PADDING * 2 + 2.dp + 2.dp
-    val needed = with(density) {
-        labels.flatMap { it.split(WORD_BREAK) }.maxOf { measurer.measure(it, style, maxLines = 1).size.width }.toDp()
-    } + chrome
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val n = (columns + 1).first { n -> n == 1 || (maxWidth - GAP * (n - 1)) / n >= needed }
-        Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
-            labels.indices.chunked(n).forEach { row ->
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(GAP)) {
-                    row.forEach { i ->
-                        Pill(
-                            // Android's line breaker does not break after a hyphen by itself.
-                            labels[i].replace("-", "-\u200B"),
-                            { if (i != selected) onSelect(i) },
-                            Modifier.weight(1f).fillMaxHeight(),
-                            enabled = enabled,
-                            filled = if (i == selected) c.text else null,
-                            textColor = if (i == selected) c.bg else null,
-                            horizontalPadding = CHIP_PADDING,
-                        )
-                    }
-                    repeat(n - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-            }
-        }
-    }
-}
-
-/** Where a label may wrap: at a space, or after a hyphen. */
-private val WORD_BREAK = Regex("""\s+|(?<=-)""")
-
-@Composable
-private fun SubHeading(text: String, first: Boolean = false) =
-    Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = if (first) 0.dp else 16.dp, bottom = 8.dp))
 
 // ---------- manage screen ----------
 

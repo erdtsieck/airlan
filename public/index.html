@@ -81,13 +81,40 @@
   .other-mode { text-align: center; color: var(--muted); font-size: 13px; margin-top: 8px; }
 
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
-  .airflow h3 { font-size: 14px; font-weight: 500; color: var(--muted); margin: 16px 0 8px; }
-  .airflow h2 + h3 { margin-top: 0; }
-  /* Rows of equal buttons; the number of columns is set by fitColumns() in app.js. A label
-     may wrap between words (Midden-rechts at the hyphen), never inside one. */
-  .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .seg button { padding: 10px 6px; line-height: 1.25; overflow-wrap: normal; word-break: normal; border-radius: 12px; border: 1px solid var(--line); }
-  .seg button[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
+  /* Airflow: --flow is the colour of the unit's mode (cooling or heating). */
+  .airflow { padding-bottom: 6px; --flow-soft: color-mix(in srgb, var(--flow) 16%, var(--card)); --idle: color-mix(in srgb, var(--muted) 40%, var(--card)); }
+  .af-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .af-head h2 { margin: 0; }
+  .af-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; min-height: 68px; border-top: 1px solid var(--line); padding: 6px 0; }
+  .af-head + .af-row { border-top: 0; }
+  .af-row.minor-row { min-height: 52px; }
+  .af-label { display: flex; flex-direction: column; gap: 2px; }
+  .af-label b { font-size: 14px; font-weight: 500; }
+  .af-label .minor { color: var(--muted); font-weight: 400; }
+  .af-label .val { font-size: 13px; font-weight: 600; color: var(--flow); }
+  .af-ctl { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .airflow .pill, .chip3d { min-height: 36px; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .airflow .pill[aria-pressed="true"] { background: var(--flow-soft); border-color: transparent; color: var(--flow); }
+  .chip3d { display: inline-flex; align-items: center; gap: 6px; padding-left: 9px; }
+  .chip3d svg { width: 18px; height: 18px; }
+  .chip3d[aria-pressed="true"] { background: var(--flow); border-color: var(--flow); color: #fff; }
+  .airflow .round { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); }
+  .airflow .round[aria-pressed="true"] { background: var(--flow-soft); border-color: transparent; color: var(--flow); }
+  .airflow .round svg { width: 20px; height: 20px; }
+  /* Volume-style bars; each sits at the bottom of a button big enough to hit. */
+  .bars { display: flex; }
+  .bar { width: 30px; height: 48px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 12px; }
+  .bar span { width: 18px; border-radius: 5px; background: var(--idle); }
+  .bar span.lit { background: var(--flow); }
+  .fan { cursor: pointer; overflow: visible; touch-action: manipulation; }
+  .fan line { stroke-width: 4.5; stroke-linecap: round; }
+  .fan .idle { stroke: var(--idle); }
+  .fan .lit { stroke: var(--flow); }
+  .fan .faint { stroke: var(--flow); opacity: .45; }
+  .fan .end { fill: var(--flow); }
+  .fan .body { fill: var(--muted); opacity: .35; }
+  .fan g:focus-visible line { stroke-width: 7; }
+  .fan.disabled, .airflow button:disabled { opacity: .45; cursor: default; }
   .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
   .chips button { padding: 10px 6px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   .chips button:active:not(:disabled) { background: var(--line); }
