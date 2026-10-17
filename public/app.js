@@ -30,12 +30,18 @@ const ICONS = {
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6-6"/></svg>',
   edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
 };
-// Fan speed: 'auto' or a manual step; the up/down vane: 'swing' or a fixed position (1 is the top).
+// Fan speed: 'auto' or a manual step, quiet to high. The up/down vane: 'swing' or a fixed
+// position, highest to lowest. The left/right vane: 'swing', 1–5 from left to right, 6 spread
+// out, 7 pointed inwards. '3d' (3D auto) hands both vanes to the unit; only for units that
+// report their left/right vane (vaneLR is null for the others).
 const FAN_SPEEDS = ['auto', 1, 2, 3, 4];
 const VANES = ['swing', 1, 2, 3, 4];
+const VANES_LR = ['swing', 1, 2, 3, 4, 5, 6, 7];
 const parseSetting = (s) => /^\d$/.test(s) ? Number(s) : s;
-const fanLabel = (f) => f === 'auto' ? t('fanAuto') : f ?? '–';
-const vaneLabel = (v) => v === 'swing' ? t('swing') : v ?? '–';
+const label = (prefix) => (v) => v === null || v === undefined ? '–' : v === '3d' ? t('auto3d') : t(`${prefix}_${v}`);
+const fanLabel = label('fan');
+const vaneLabel = label('vane');
+const vaneLRLabel = label('vaneLR');
 const TIMER_MINUTES = [15, 30, 60, 120, 180, 240, 300, 360];
 const TEMP_MIN = 16, TEMP_MAX = 30;
 
@@ -142,12 +148,12 @@ function remaining(offAt) {
 }
 
 /**
- * Equal buttons side by side, at most `max` to a row, fewer when a label would not fit
- * (large text, a narrow screen, a long translation): a button never cuts its label off.
+ * Equal buttons side by side, as many to a row as the first of `counts` (or `counts` and
+ * fewer) at which no label is cut off by a narrow screen, large text or a long translation.
  */
-function fitColumns(grid, max) {
+function fitColumns(grid, counts) {
   if (!grid) return;
-  for (let n = max; n >= 1; n--) {
+  for (const n of Array.isArray(counts) ? [...counts, 1] : Array.from({ length: counts }, (_, i) => counts - i)) {
     grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
     if (![...grid.children].some(overflows)) return;
   }
@@ -163,6 +169,15 @@ function overflows(el) {
   const style = getComputedStyle(el);
   const room = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
   return range.getBoundingClientRect().width > room + 0.5;
+}
+
+/** Lays out every row of equal buttons; rows of options prefer counts that leave no orphans. */
+function fitAll() {
+  fitColumns(document.querySelector('.modes'), 2);
+  fitColumns(document.querySelector('.chips'), 4);
+  fitColumns($('fan'), [5, 3, 2]);
+  fitColumns($('vane'), $('vane')?.children.length === 6 ? [6, 3, 2] : [5, 3, 2]);
+  fitColumns($('vaneLR'), [3, 2]);
 }
 
 function escape(s) {
@@ -279,7 +294,9 @@ function render() {
       <h3>${t('fanSpeed')}</h3>
       <div class="seg" id="fan">${FAN_SPEEDS.map((f) => `<button data-fan="${f}" aria-pressed="${u.fanSpeed === f}" ${off ? 'disabled' : ''}>${fanLabel(f)}</button>`).join('')}</div>
       <h3>${t('vane')}</h3>
-      <div class="seg" id="vane">${VANES.map((v) => `<button data-vane="${v}" aria-pressed="${u.vane === v}" ${off ? 'disabled' : ''}>${vaneLabel(v)}</button>`).join('')}</div>
+      <div class="seg" id="vane">${[...VANES, ...(u.vaneLR !== null ? ['3d'] : [])].map((v) => `<button data-vane="${v}" aria-pressed="${u.vane === v}" ${off ? 'disabled' : ''}>${vaneLabel(v)}</button>`).join('')}</div>${u.vaneLR !== null ? `
+      <h3>${t('vaneLR')}</h3>
+      <div class="seg" id="vaneLR">${[...VANES_LR, '3d'].map((v) => `<button data-vane-lr="${v}" aria-pressed="${u.vaneLR === v}" ${off ? 'disabled' : ''}>${vaneLRLabel(v)}</button>`).join('')}</div>` : ''}
     </section>`;
 
   $('rename').onclick = () => rename(u);
@@ -302,10 +319,13 @@ function render() {
     const v = parseSetting(b.dataset.vane);
     if (u.vane !== v) change({ vane: v }, `${t('vane')}: ${vaneLabel(v)}`);
   });
+  document.querySelectorAll('[data-vane-lr]').forEach((b) => b.onclick = () => {
+    const v = parseSetting(b.dataset.vaneLr);
+    if (u.vaneLR !== v) change({ vaneLR: v }, `${t('vaneLR')}: ${vaneLRLabel(v)}`);
+  });
   document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer(Number(b.dataset.min)));
   if ($('cancel')) $('cancel').onclick = () => timer(null);
-  fitColumns(document.querySelector('.modes'), 2);
-  fitColumns(document.querySelector('.chips'), 4);
+  fitAll();
 }
 
 function renderManage() {
@@ -400,8 +420,7 @@ document.addEventListener('click', (e) => {
 });
 addEventListener('resize', () => {
   renderTiles();
-  fitColumns(document.querySelector('.modes'), 2);
-  fitColumns(document.querySelector('.chips'), 4);
+  fitAll();
 });
 
 $('units').addEventListener('click', (e) => {

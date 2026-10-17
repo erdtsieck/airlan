@@ -117,3 +117,22 @@ test('fan speed and the up/down vane are written with the rest of the state kept
     assert.deepEqual([unit.state.airFlow, unit.state.windUD, unit.state.power, unit.state.presetTemp], [airFlow, windUD, true, 22]);
   }
 });
+
+test('the left/right vane and 3D auto are written, and read back by an extended unit', async (t) => {
+  const { unit, client } = await setup(t);
+  await client.change(ID, { power: true, presetTemp: 22 }, { timezone: 'UTC' });
+  for (const windLR of [0, 1, 5, 6, 7]) {
+    const next = await client.change(ID, { windLR, entrust: false }, { timezone: 'UTC' });
+    assert.deepEqual([next.windLR, next.entrust, next.vaneLRReported], [windLR, false, true]);
+  }
+  const next = await client.change(ID, { entrust: true }, { timezone: 'UTC' });
+  assert.deepEqual([next.entrust, unit.state.power, unit.state.presetTemp], [true, true, 22]);
+});
+
+test('a legacy unit takes left/right vane commands but never reports them', async (t) => {
+  const { unit, client } = await setup(t, { legacy: true });
+  await client.change(ID, { windLR: 3 }, { timezone: 'UTC' });
+  assert.equal(unit.state.windLR, 3);
+  const { state } = await client.getStat(ID);
+  assert.deepEqual([state.windLR, state.entrust, state.vaneLRReported], [0, false, false]);
+});

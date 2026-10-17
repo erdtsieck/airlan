@@ -4,6 +4,7 @@
 //                            [--power on|off] [--mode cool|heat|auto|fan|dry] [--temp 21]
 //                            [--indoor 23.5] [--outdoor 14.5]
 //                            [--accounts-taken 0..4] [--other-writer-every <seconds>] [--mdns]
+//                            [--model 0|1|2|3|64] [--legacy]
 //
 // Answers getDeviceInfo, getAirconStat, setAirconStat, updateAccountInfo and
 // deleteAccountInfo over plain HTTP like the HTTP firmware does, keeps the state across
@@ -17,6 +18,9 @@
 //    that writes on a cadence);
 //  - refuses request bodies with "\/" escapes, which the real parser does not undo;
 //  - with --mdns, answers mDNS queries for _beaver._tcp.local.
+//  - --model sets the model group byte (64: a ceiling cassette, no left/right vane);
+//    --legacy reports byte 12 pinned to 1, as a unit with the legacy bus signature does:
+//    it takes left/right vane and 3D auto commands but never reports them back.
 // Point AirLAN at it by IP address (from the Android emulator: 10.0.2.2).
 //
 // The tests use startFakeUnit() directly.
@@ -31,7 +35,8 @@ import { indoorTemp, outdoorTemp } from '../temp-tables.js';
 import { parseMessage, encodeAnnouncement, SERVICE } from '../mdns.js';
 
 const nearest = (table, t) => table.reduce((best, v, i) => (Math.abs(v - t) < Math.abs(table[best] - t) ? i : best), 0);
-const describe = (s) => `${s.power ? 'ON ' : 'off'} ${MODE_NAMES[s.mode]} ${s.presetTemp}°`;
+const describe = (s) =>
+  `${s.power ? 'ON ' : 'off'} ${MODE_NAMES[s.mode]} ${s.presetTemp}° fan ${s.airFlow} vanes ${s.entrust ? '3D auto' : `${s.windUD}/${s.windLR}`}`;
 
 /**
  * Starts a fake unit. Returns `{ server, port, unit }`, where `unit` exposes the simulated
@@ -45,13 +50,15 @@ export function startFakeUnit({
   indoor = 23.5,
   outdoor = 14.5,
   accountsTaken = 0,
+  legacy = false,
+  model,
   state: initial = {},
   log = () => {},
 } = {}) {
   // Start from a frame captured from a real unit (switched off, cooling, 21 °C).
   const live = JSON.parse(readFileSync(new URL('../test/fixtures/live-frames.json', import.meta.url)));
   const unit = {
-    state: { ...decode(live.frames.e81656c09e49.airconStat), ...initial },
+    state: { ...decode(live.frames.e81656c09e49.airconStat), ...(model !== undefined && { modelNrRaw: model, modelNr: [0, 1, 2].indexOf(model === 3 ? 2 : model) }), ...initial },
     accounts: new Set(Array.from({ length: accountsTaken }, (_, i) => `other-app-${i + 1}`)),
     lock: { writer: null, expires: 0 },
     clock: Math.round(Date.now() / 1000),
@@ -66,8 +73,10 @@ export function startFakeUnit({
   function frame(s) {
     const bytes = [...Buffer.from(encode(s), 'base64')];
     const command = bytes.slice(0, 25); // 18-byte block + 1 segment (5 bytes) + CRC
+    const state = bytes.slice(25, 25 + 18);
+    if (legacy) state[12] = 1;
     const receive = [
-      ...bytes.slice(25, 25 + 18),
+      ...state,
       2, 0x80, 0x20, nearest(indoorTemp, indoor), 0, 0x80, 0x10, nearest(outdoorTemp, outdoor), 0,
     ];
     const crc = crc16(receive);
@@ -193,6 +202,8 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     indoor: Number(arg('indoor', 23.5)),
     outdoor: Number(arg('outdoor', 14.5)),
     accountsTaken: Number(arg('accounts-taken', 0)),
+    legacy: flag('legacy'),
+    model: arg('model') === undefined ? undefined : Number(arg('model')),
     state: initial,
     log,
   });

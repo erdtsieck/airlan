@@ -62,6 +62,10 @@ export function decode(base64) {
     windUD: (c[2] & 0xc0) === 0x40 ? 0 : [0, 16, 32, 48].indexOf(c[3] & 0xf0) + 1,
     windLR: (c[12] & 0x03) === 1 ? 0 : [0, 1, 2, 3, 4, 5, 6].indexOf(c[11] & 0x1f) + 1,
     entrust: (c[12] & 0x0c) === 4,
+    // The module pins byte 12 to 1 on units with the legacy bus signature, which then never
+    // report their left/right vane or 3D auto. Anything else proves that they do; a 1 alone
+    // proves nothing, as it is also an extended unit with its left/right vane on swing.
+    vaneLRReported: c[12] !== 1,
     coolHotJudge: (c[8] & 0x08) === 0,
     modelNrRaw,
     modelNr,
@@ -79,6 +83,12 @@ export function decode(base64) {
   }
   return s;
 }
+
+/**
+ * Whether a unit's model line has a left/right vane and 3D auto, per the official app's
+ * capability table: every model group except the ceiling cassettes (64).
+ */
+export const modelHasVaneLR = (modelNrRaw) => modelNrRaw !== 64;
 
 function commandBlock(s) {
   const b = emptyBlock();

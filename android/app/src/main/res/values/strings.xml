@@ -26,10 +26,38 @@
     <string name="auto_off">Auto off</string>
     <string name="airflow">Airflow</string>
     <string name="fan_speed">Fan speed</string>
-    <string name="fan_auto">Auto</string>
-    <!-- The up/down vane: swinging or a fixed position 1–4. -->
+    <!-- Auto, then the four steps from quiet to high, as the remote names them. -->
+    <string-array name="fan_speeds">
+        <item>Auto</item>
+        <item>Quiet</item>
+        <item>Low</item>
+        <item>Medium</item>
+        <item>High</item>
+    </string-array>
+    <!-- The up/down vane: swinging, or a fixed position from highest to lowest. -->
     <string name="vane">Up/down direction</string>
-    <string name="swing">Swing</string>
+    <string-array name="vanes_ud">
+        <item>Swing</item>
+        <item>Highest</item>
+        <item>Middle</item>
+        <item>Normal</item>
+        <item>Lowest</item>
+    </string-array>
+    <!-- The left/right vanes: swinging, five directions from left to right, both spread out
+         (Wide) or both pointed inwards (Narrow). -->
+    <string name="vane_lr">Left/right direction</string>
+    <string-array name="vanes_lr">
+        <item>Swing</item>
+        <item>Left</item>
+        <item>Centre left</item>
+        <item>Centre</item>
+        <item>Centre right</item>
+        <item>Right</item>
+        <item>Wide</item>
+        <item>Narrow</item>
+    </string-array>
+    <!-- The unit aims both vanes itself. -->
+    <string name="auto_3d">3D auto</string>
     <string name="off_at">Switches off at %1$s</string>
     <string name="cancel">Cancel</string>
     <string name="turn_on_for_timer">Turn the unit on to pick a switch-off time.</string>

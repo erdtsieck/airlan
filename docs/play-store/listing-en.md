@@ -17,7 +17,7 @@ What you can do, per air conditioner:
 • Choose cooling or heating
 • Set the temperature in half degrees
 • Have it switch off automatically after 15 or 30 minutes or 1 to 6 hours
-• Set the fan speed and the up/down direction
+• Set the fan speed and the direction of the air, including 3D auto on units that have it
 
 With several air conditioners, a tile per unit shows at a glance which ones are running.
 

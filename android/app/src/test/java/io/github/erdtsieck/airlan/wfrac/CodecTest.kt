@@ -3,8 +3,10 @@ package io.github.erdtsieck.airlan.wfrac
 import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Uses the same vectors as the Node implementation's test/codec.test.js. */
@@ -80,6 +82,16 @@ class CodecTest {
             val v = encode.getJSONObject(i)
             assertEquals(v.getJSONObject("state").toString(), v.getString("frame"), Codec.encode(v.getJSONObject("state").toState()))
         }
+    }
+
+    @Test
+    fun `byte 12 pinned to 1 is the only reading that does not prove a reported left-right vane`() {
+        for (id in live.keys()) assertTrue(Codec.decode(live.getJSONObject(id).getString("airconStat")).vaneLRReported)
+        val base = Codec.decode(live.getJSONObject("e81656c09e49").getString("airconStat")).copy(modelNr = 0, modelNrRaw = 0, entrust = false)
+        assertFalse(Codec.decode(Codec.encode(base.copy(windLR = 0))).vaneLRReported)
+        assertTrue(Codec.decode(Codec.encode(base.copy(windLR = 3))).vaneLRReported)
+        assertTrue(Codec.decode(Codec.encode(base.copy(entrust = true))).vaneLRReported)
+        assertEquals(listOf(true, true, true, true, false), listOf(0, 1, 2, 3, 64).map(Codec::modelHasVaneLR))
     }
 
     @Test

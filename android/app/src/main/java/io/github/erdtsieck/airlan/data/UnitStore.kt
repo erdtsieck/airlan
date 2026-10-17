@@ -1,5 +1,7 @@
 package io.github.erdtsieck.airlan.data
 
+import io.github.erdtsieck.airlan.wfrac.AirconState
+import io.github.erdtsieck.airlan.wfrac.Codec
 import io.github.erdtsieck.airlan.wfrac.Scheme
 import java.io.File
 import java.util.UUID
@@ -26,7 +28,19 @@ data class StoredUnit(
     val demo: Boolean = false,
     /** Moved off [StoreState.legacyOperatorId] to the shared account; see [Repository.migrateAccounts]. */
     val accountMigrated: Boolean = false,
+    /** The model group byte, once read; see [aimsBothVanes]. */
+    val modelNrRaw: Int? = null,
+    /** Once true, the unit has shown that it reports its left/right vane; see [AirconState.vaneLRReported]. */
+    val reportsVaneLR: Boolean = false,
 )
+
+/**
+ * Whether the unit gets the left/right vane and 3D auto: its model line has them and it has
+ * shown that it reports them back. A unit that never does would always read back as
+ * swinging, whatever was chosen. The demo unit has everything.
+ */
+val StoredUnit.aimsBothVanes: Boolean
+    get() = demo || (reportsVaneLR && modelNrRaw?.let(Codec::modelHasVaneLR) == true)
 
 /**
  * The unit's MAC address as people see it printed (E8:16:56:C0:9E:49), to tell units apart
@@ -110,6 +124,8 @@ class UnitStore(private val file: File) {
                     },
                     demo = u.optBoolean("demo", false),
                     accountMigrated = u.optBoolean("accountMigrated", false),
+                    modelNrRaw = if (u.has("modelNrRaw")) u.getInt("modelNrRaw") else null,
+                    reportsVaneLR = u.optBoolean("reportsVaneLR", false),
                 )
             },
         )
@@ -137,6 +153,8 @@ class UnitStore(private val file: File) {
                                 }
                                 if (u.demo) put("demo", true)
                                 if (u.accountMigrated) put("accountMigrated", true)
+                                u.modelNrRaw?.let { put("modelNrRaw", it) }
+                                if (u.reportsVaneLR) put("reportsVaneLR", true)
                             }
                     },
                 ),

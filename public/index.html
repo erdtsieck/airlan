@@ -83,9 +83,10 @@
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
   .airflow h3 { font-size: 14px; font-weight: 500; color: var(--muted); margin: 16px 0 8px; }
   .airflow h2 + h3 { margin-top: 0; }
-  /* Equal buttons, but a longer label (Auto, Swing) takes the width it needs; wraps only when nothing fits. */
-  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
-  .seg button { flex: 1 1 0; min-width: max-content; padding: 10px 12px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); }
+  /* Rows of equal buttons; the number of columns is set by fitColumns() in app.js. A label
+     may wrap between words (Midden-rechts at the hyphen), never inside one. */
+  .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .seg button { padding: 10px 6px; line-height: 1.25; overflow-wrap: normal; word-break: normal; border-radius: 12px; border: 1px solid var(--line); }
   .seg button[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
   .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
   .chips button { padding: 10px 6px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }

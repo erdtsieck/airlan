@@ -205,8 +205,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** [airFlow] 0 is auto, 1–4 the manual steps. */
     fun setFanSpeed(airFlow: Int) = write { it.copy(airFlow = airFlow) }
 
-    /** [windUD] 0 is swing, 1–4 a fixed position of the up/down vane (1 at the top). */
-    fun setVane(windUD: Int) = write { it.copy(windUD = windUD) }
+    /** [windUD] 0 is swing, 1–4 a fixed position of the up/down vane, highest to lowest. Ends 3D auto. */
+    fun setVane(windUD: Int) = write { it.copy(windUD = windUD, entrust = false) }
+
+    /**
+     * [windLR] 0 is swing, 1–5 a fixed position of the left/right vane from left to right, 6
+     * spread out, 7 pointed inwards. Ends 3D auto.
+     */
+    fun setVaneLR(windLR: Int) = write { it.copy(windLR = windLR, entrust = false) }
+
+    /** 3D auto: the unit aims both vanes itself. */
+    fun setAuto3d() = write { it.copy(entrust = true) }
 
     /** The module wants to be addressed calmly: only send once the taps have stopped. */
     fun nudgeTemp(delta: Double) {
