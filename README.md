@@ -23,6 +23,34 @@ follow the device's language (English and Dutch so far) and light/dark theme.
 > AirLAN is an independent project. It is not affiliated with, endorsed by or supported by
 > Mitsubishi Heavy Industries. "Works with" means: tested against WF-RAC modules, see below.
 
+## Beta testing
+
+The Android app is in a closed beta on Google Play. Anyone can join:
+
+1. Join the [AirLAN testers group](https://groups.google.com/g/airlan-testers) with the
+   Google account you use on your phone. Other members cannot see who is in the group, and
+   the group sends no mail.
+2. Open [the beta page](https://play.google.com/apps/testing/io.github.erdtsieck.airlan)
+   with that same account and tap *Become a tester*.
+3. Install AirLAN from Google Play. It can take a few minutes after step 2 before the
+   install button appears.
+
+Please stay in the beta for at least 14 days: Google only lets a new developer publish the
+app for everyone after a closed test with enough testers for that long.
+
+What is confirmed to work, and what is not:
+
+- **Confirmed:** Mitsubishi Heavy Industries indoor units with the WF-RAC module on the
+  HTTP firmware (wireless 010, MCU 131), on the developer's own three units.
+- **Untested:** the HTTPS firmware branches (`WF-RAC-HTTPS`, `WCBN4612L`), see
+  [Supported firmware](#supported-firmware). Reports are very welcome.
+- **Not supported:** Mitsubishi **Electric** units (MELCloud, MAC-xxx Wi-Fi interfaces).
+  They use a different system.
+
+Found a problem, or does it work with your unit? Please
+[open an issue](https://github.com/erdtsieck/airlan/issues/new/choose); the form asks for
+the unit model and the versions that help most.
+
 ## Android app
 
 The app finds the units on your Wi-Fi network, asks you to name them, and runs the
