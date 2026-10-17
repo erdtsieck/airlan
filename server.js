@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WfRacClient, WfRacError, MODE_NAMES, PORT as WFRAC_PORT } from './wfrac.js';
+import { WfRacClient, WfRacError, MODE_NAMES, PORT as WFRAC_PORT, modelHasVaneLR } from './wfrac.js';
 import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
 import { browse } from './mdns.js';
 import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from './timer-policy.js';
@@ -168,8 +168,24 @@ async function readStat(unit) {
   const { state } = await withUnit(unit, (c) => c.getStat(unit.airconId));
   const entry = { at: Date.now(), state };
   cache.set(unit.airconId, entry);
+  noteAirflowSupport(unit, state);
   return entry;
 }
+
+/**
+ * The left/right vane and 3D auto are offered for a unit once it has shown that it reports
+ * them (see vaneLRReported in wfrac.js): a unit that never does would always read back as
+ * swinging, whatever was chosen. Remembered, as a unit with its left/right vane on swing
+ * reads the same as one that never reports it.
+ */
+function noteAirflowSupport(unit, state) {
+  if (unit.modelNrRaw === state.modelNrRaw && (unit.reportsVaneLR || !state.vaneLRReported)) return;
+  unit.modelNrRaw = state.modelNrRaw;
+  unit.reportsVaneLR ||= state.vaneLRReported;
+  saveStore();
+}
+
+const aimsBothVanes = (unit) => !!unit.reportsVaneLR && unit.modelNrRaw !== undefined && modelHasVaneLR(unit.modelNrRaw);
 
 /**
  * Registers our account with a unit the user claims (adds or names), so a unit without a
@@ -191,6 +207,7 @@ async function applyChange(unit, change, { waitUpToS = 20 } = {}) {
   await migrate(unit);
   const state = await withUnit(unit, (c) => c.change(unit.airconId, change, { timezone: TIMEZONE, waitUpToS }));
   cache.set(unit.airconId, { at: Date.now(), state });
+  noteAirflowSupport(unit, state);
   log(`${unit.name}: ${JSON.stringify(change)}`);
 }
 
@@ -281,11 +298,31 @@ function parseChange(body) {
     if (f < 0) throw new HttpError(400, 'invalid', 'fanSpeed must be "auto" or 1–4');
     change.airFlow = f;
   }
+  // 3D auto hands both vanes to the unit; choosing either direction ends it.
   if ('vane' in body) {
-    // The up/down vane: 'swing' or a fixed position 1 (top) – 4 (bottom) (windUD 0 is swing).
-    const v = body.vane === 'swing' ? 0 : [1, 2, 3, 4].includes(body.vane) ? body.vane : -1;
-    if (v < 0) throw new HttpError(400, 'invalid', 'vane must be "swing" or 1–4');
-    change.windUD = v;
+    // The up/down vane: 'swing', a fixed position 1 (highest) – 4 (lowest) (windUD 0 is
+    // swing), or '3d'.
+    if (body.vane === '3d') change.entrust = true;
+    else {
+      const v = body.vane === 'swing' ? 0 : [1, 2, 3, 4].includes(body.vane) ? body.vane : -1;
+      if (v < 0) throw new HttpError(400, 'invalid', 'vane must be "swing", 1–4 or "3d"');
+      change.windUD = v;
+      change.entrust = false;
+    }
+  }
+  if ('vaneLR' in body) {
+    // The left/right vane: 'swing', 1–5 from left to right, 6 spread out, 7 pointed inwards
+    // (windLR 0 is swing), or '3d'.
+    if (body.vaneLR === '3d') change.entrust = true;
+    else {
+      const v = body.vaneLR === 'swing' ? 0 : [1, 2, 3, 4, 5, 6, 7].includes(body.vaneLR) ? body.vaneLR : -1;
+      if (v < 0) throw new HttpError(400, 'invalid', 'vaneLR must be "swing", 1–7 or "3d"');
+      change.windLR = v;
+      change.entrust = false;
+    }
+  }
+  if ('vane' in body && 'vaneLR' in body && (body.vane === '3d') !== (body.vaneLR === '3d')) {
+    throw new HttpError(400, 'invalid', '"3d" applies to both vanes: send it for both or for neither');
   }
   return change;
 }
@@ -333,7 +370,7 @@ async function unitView(unit) {
       mode: MODE_NAMES[state.mode] ?? 'unknown',
       presetTemp: state.presetTemp,
       fanSpeed: state.airFlow === 0 ? 'auto' : state.airFlow > 0 ? state.airFlow : null,
-      vane: state.windUD === 0 ? 'swing' : state.windUD > 0 ? state.windUD : null,
+      ...airflowView(unit, state),
       indoorTemp: state.indoorTemp,
       outdoorTemp: state.outdoorTemp,
       errorCode: state.errorCode,
@@ -342,6 +379,16 @@ async function unitView(unit) {
     const err = toHttpError(e);
     return { ...base, online: false, error: err.body };
   }
+}
+
+/** The vanes as the API shows them; `vaneLR` is null for a unit that cannot aim both. */
+function airflowView(unit, state) {
+  const both = aimsBothVanes(unit);
+  const named = (v) => (v === 0 ? 'swing' : v > 0 ? v : null);
+  return {
+    vane: both && state.entrust ? '3d' : named(state.windUD),
+    vaneLR: both ? (state.entrust ? '3d' : named(state.windLR)) : null,
+  };
 }
 
 async function readJson(req) {
@@ -442,6 +489,11 @@ async function route(req, res) {
         warning = await registerWarning(unit);
       }
       const change = parseChange(body);
+      if ('vaneLR' in body || change.entrust) {
+        // What the unit supports is learnt from reading it.
+        if (!aimsBothVanes(unit)) await readStat(unit);
+        if (!aimsBothVanes(unit)) throw new HttpError(400, 'invalid', 'this unit does not report a left/right vane or 3D auto');
+      }
       if (Object.keys(change).length) {
         await applyChange(unit, change);
         delete unit.timerFailedAt;

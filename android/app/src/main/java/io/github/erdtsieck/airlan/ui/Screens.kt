@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -74,9 +75,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.erdtsieck.airlan.R
+import io.github.erdtsieck.airlan.data.aimsBothVanes
 import io.github.erdtsieck.airlan.data.macLabel
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MAX
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MIN
+import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.Mode
 import java.text.DateFormat
 import java.util.Date
@@ -288,6 +291,8 @@ fun UnitScreen(
     onMode: (Mode) -> Unit,
     onFanSpeed: (Int) -> Unit,
     onVane: (Int) -> Unit,
+    onVaneLR: (Int) -> Unit,
+    onAuto3d: () -> Unit,
     onNudge: (Double) -> Unit,
     onTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
@@ -450,7 +455,7 @@ fun UnitScreen(
         }
     }
 
-    AirflowCard(s?.airFlow, s?.windUD, enabled = !disabled, onFanSpeed, onVane)
+    AirflowCard(s, unit.stored.aimsBothVanes, enabled = !disabled, onFanSpeed, onVane, onVaneLR, onAuto3d)
 
     StatusLine(state.status ?: unit.error?.let { Status(it, isError = true) })
 
@@ -632,79 +637,90 @@ private object NameAndTemperaturePolicy : MeasurePolicy {
         measurables[0].maxIntrinsicWidth(height) + (measurables.getOrNull(1)?.let { it.maxIntrinsicWidth(height) + GAP_DP.dp.roundToPx() } ?: 0)
 }
 
-/** 0 is auto, 1–4 the manual steps. */
-private val FAN_SPEEDS = listOf(0, 1, 2, 3, 4)
-
-/** 0 is swing, 1–4 a fixed position of the up/down vane. */
-private val VANES = listOf(0, 1, 2, 3, 4)
-
-/** Fan speed and the up/down vane: below the timer, as they are needed least. */
+/**
+ * Fan speed and the vanes: below the timer, as they are needed least. The left/right vane and
+ * 3D auto only for a unit that [aimsBothVanes]; 3D auto shows in both rows, as it aims both.
+ */
 @Composable
-private fun AirflowCard(airFlow: Int?, windUD: Int?, enabled: Boolean, onFanSpeed: (Int) -> Unit, onVane: (Int) -> Unit) {
-    val fanLabels = FAN_SPEEDS.map { if (it == 0) stringResource(R.string.fan_auto) else it.toString() }
-    val vaneLabels = VANES.map { if (it == 0) stringResource(R.string.swing) else it.toString() }
+private fun AirflowCard(
+    s: AirconState?,
+    aimsBothVanes: Boolean,
+    enabled: Boolean,
+    onFanSpeed: (Int) -> Unit,
+    onVane: (Int) -> Unit,
+    onVaneLR: (Int) -> Unit,
+    onAuto3d: () -> Unit,
+) {
+    val auto3d = aimsBothVanes && s?.entrust == true
+    val auto3dLabel = stringResource(R.string.auto_3d)
     Card {
         Heading(stringResource(R.string.airflow))
         SubHeading(stringResource(R.string.fan_speed), first = true)
-        Segmented(fanLabels, FAN_SPEEDS.indexOf(airFlow), enabled) { onFanSpeed(FAN_SPEEDS[it]) }
+        val fan = stringArrayResource(R.array.fan_speeds).toList()
+        OptionGrid(fan, s?.airFlow ?: -1, enabled, listOf(5, 3, 2)) { onFanSpeed(it) }
+
         SubHeading(stringResource(R.string.vane))
-        Segmented(vaneLabels, VANES.indexOf(windUD), enabled) { onVane(VANES[it]) }
-    }
-}
+        val ud = stringArrayResource(R.array.vanes_ud).toList() + if (aimsBothVanes) listOf(auto3dLabel) else emptyList()
+        val udSelected = if (auto3d) ud.lastIndex else s?.windUD ?: -1
+        OptionGrid(ud, udSelected, enabled, if (ud.size == 6) listOf(6, 3, 2) else listOf(5, 3, 2)) {
+            if (it == 5) onAuto3d() else onVane(it)
+        }
 
-@Composable
-private fun SubHeading(text: String, first: Boolean = false) =
-    Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = if (first) 0.dp else 16.dp, bottom = 8.dp))
-
-/**
- * Options side by side, equally wide unless a label needs more (Auto, Swing); when even that
- * does not fit they wrap, as a [FittingGrid]. Labels are measured, so none is cut off.
- */
-@Composable
-private fun Segmented(labels: List<String>, selected: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
-    val c = LocalAirColors.current
-    val measurer = rememberTextMeasurer()
-    val style = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
-    val density = LocalDensity.current
-    val chrome = CHIP_PADDING * 2 + 2.dp + 2.dp
-    val needs = labels.map { with(density) { measurer.measure(it, style, maxLines = 1).size.width.toDp() } + chrome }
-    val item = @Composable { i: Int, modifier: Modifier ->
-        Pill(
-            labels[i],
-            { if (i != selected) onSelect(i) },
-            modifier,
-            enabled = enabled,
-            filled = if (i == selected) c.text else null,
-            textColor = if (i == selected) c.bg else null,
-            horizontalPadding = CHIP_PADDING,
-        )
-    }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val room = maxWidth - GAP * (labels.size - 1)
-        if (needs.fold(0.dp) { a, b -> a + b } > room) {
-            FittingGrid(labels, maxColumns = labels.size, chrome = chrome) { i, m -> item(i, m) }
-        } else {
-            // Like CSS flex: 1 1 0 with min-width: max-content — equal shares, but never less than needed.
-            val widths = shares(needs, room)
-            Row(horizontalArrangement = Arrangement.spacedBy(GAP)) {
-                labels.indices.forEach { i -> item(i, Modifier.width(widths[i])) }
+        if (aimsBothVanes) {
+            SubHeading(stringResource(R.string.vane_lr))
+            val lr = stringArrayResource(R.array.vanes_lr).toList() + auto3dLabel
+            OptionGrid(lr, if (auto3d) lr.lastIndex else s?.windLR ?: -1, enabled, listOf(3, 2)) {
+                if (it == lr.lastIndex) onAuto3d() else onVaneLR(it)
             }
         }
     }
 }
 
-/** Splits [room] equally over items, except that each gets at least what it [needs]. */
-private fun shares(needs: List<Dp>, room: Dp): List<Dp> {
-    val fixed = mutableSetOf<Int>()
-    while (true) {
-        val free = needs.indices - fixed
-        val left = room - fixed.fold(0.dp) { a, i -> a + needs[i] }
-        val share = left / free.size
-        val grow = free.filter { needs[it] > share }
-        if (grow.isEmpty()) return needs.indices.map { if (it in fixed) needs[it] else share }
-        fixed += grow
+/**
+ * Equal buttons in rows, as many to a row as the first of [columns] (or 1) at which every
+ * label fits. A label may wrap between words, at a space or after a hyphen (Midden-rechts),
+ * never inside one, so only its longest word has to fit. Buttons in a row are equally tall.
+ */
+@Composable
+private fun OptionGrid(labels: List<String>, selected: Int, enabled: Boolean, columns: List<Int>, onSelect: (Int) -> Unit) {
+    val c = LocalAirColors.current
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
+    val density = LocalDensity.current
+    val chrome = CHIP_PADDING * 2 + 2.dp + 2.dp
+    val needed = with(density) {
+        labels.flatMap { it.split(WORD_BREAK) }.maxOf { measurer.measure(it, style, maxLines = 1).size.width }.toDp()
+    } + chrome
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val n = (columns + 1).first { n -> n == 1 || (maxWidth - GAP * (n - 1)) / n >= needed }
+        Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
+            labels.indices.chunked(n).forEach { row ->
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(GAP)) {
+                    row.forEach { i ->
+                        Pill(
+                            // Android's line breaker does not break after a hyphen by itself.
+                            labels[i].replace("-", "-\u200B"),
+                            { if (i != selected) onSelect(i) },
+                            Modifier.weight(1f).fillMaxHeight(),
+                            enabled = enabled,
+                            filled = if (i == selected) c.text else null,
+                            textColor = if (i == selected) c.bg else null,
+                            horizontalPadding = CHIP_PADDING,
+                        )
+                    }
+                    repeat(n - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
     }
 }
+
+/** Where a label may wrap: at a space, or after a hyphen. */
+private val WORD_BREAK = Regex("""\s+|(?<=-)""")
+
+@Composable
+private fun SubHeading(text: String, first: Boolean = false) =
+    Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = if (first) 0.dp else 16.dp, bottom = 8.dp))
 
 // ---------- manage screen ----------
 

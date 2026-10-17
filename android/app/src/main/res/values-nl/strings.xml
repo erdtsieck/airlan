@@ -25,9 +25,33 @@
     <string name="auto_off">Automatisch uit</string>
     <string name="airflow">Luchtstroom</string>
     <string name="fan_speed">Ventilator</string>
-    <string name="fan_auto">Auto</string>
+    <string-array name="fan_speeds">
+        <item>Auto</item>
+        <item>Stil</item>
+        <item>Laag</item>
+        <item>Middel</item>
+        <item>Hoog</item>
+    </string-array>
     <string name="vane">Richting op/neer</string>
-    <string name="swing">Zwenken</string>
+    <string-array name="vanes_ud">
+        <item>Zwenken</item>
+        <item>Hoogst</item>
+        <item>Midden</item>
+        <item>Normaal</item>
+        <item>Laagst</item>
+    </string-array>
+    <string name="vane_lr">Richting links/rechts</string>
+    <string-array name="vanes_lr">
+        <item>Zwenken</item>
+        <item>Links</item>
+        <item>Midden-links</item>
+        <item>Midden</item>
+        <item>Midden-rechts</item>
+        <item>Rechts</item>
+        <item>Breed</item>
+        <item>Smal</item>
+    </string-array>
+    <string name="auto_3d">3D auto</string>
     <string name="off_at">Gaat uit om %1$s</string>
     <string name="cancel">Annuleren</string>
     <string name="turn_on_for_timer">Zet de airco aan om een uitschakeltijd te kiezen.</string>

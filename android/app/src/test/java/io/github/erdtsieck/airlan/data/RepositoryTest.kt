@@ -50,6 +50,22 @@ class RepositoryTest {
             lockExpires = clock + lockSeconds
         }
 
+        /** Reports byte 12 pinned to 1, as a unit with the legacy bus signature does. */
+        @Volatile var legacy = false
+
+        /** [s] as the unit reports it: byte 12 pinned to 1 when [legacy]. */
+        fun frame(s: AirconState): String {
+            val bytes = java.util.Base64.getDecoder().decode(Codec.encode(s))
+            if (legacy) {
+                val start = bytes[18] * 4 + 21
+                bytes[start + 12] = 1
+                val crc = Codec.crc16(bytes.copyOfRange(start, bytes.size - 2).map { it.toInt() and 0xff }.toIntArray())
+                bytes[bytes.size - 2] = (crc and 0xff).toByte()
+                bytes[bytes.size - 1] = (crc shr 8).toByte()
+            }
+            return java.util.Base64.getEncoder().encodeToString(bytes)
+        }
+
         /** The real module does not unescape "\/" and refuses the garbled frame; see JsonWriter. */
         @Volatile var sawEscapedSlash = false
         private val server = ServerSocket().apply {
@@ -94,7 +110,7 @@ class RepositoryTest {
                             else -> 0
                         }
                         if (command == "getAirconStat" || command == "setAirconStat") {
-                            contents.put("airconStat", Codec.encode(state)).put("expires", lockExpires).put("numOfAccount", accounts.size)
+                            contents.put("airconStat", frame(state)).put("expires", lockExpires).put("numOfAccount", accounts.size)
                         }
                         val body = JSONObject().put("result", result).put("contents", contents).toString()
                         it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.toByteArray().size}\r\n\r\n$body".toByteArray())
@@ -192,6 +208,33 @@ class RepositoryTest {
     }
 
     @Test
+    fun `a unit that reports its left-right vane gets it and 3D auto, remembered`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        assertFalse(repo.stored().aimsBothVanes)
+        repo.state(ID)
+        assertTrue(repo.stored().aimsBothVanes)
+        repo.apply(ID) { it.copy(windLR = 6, entrust = false) }
+        assertEquals(6, unit.state.windLR)
+        repo.apply(ID) { it.copy(entrust = true) }
+        assertTrue(unit.state.entrust)
+        // Swinging left and right later reads like a legacy unit; it is not forgotten.
+        unit.legacy = true
+        repo.state(ID)
+        assertTrue(repo.stored().aimsBothVanes)
+    }
+
+    @Test
+    fun `a legacy unit never gets the left-right vane`() = runBlocking {
+        unit.legacy = true
+        val repo = repository()
+        repo.add("127.0.0.1")
+        repo.state(ID)
+        assertFalse(repo.stored().aimsBothVanes)
+        assertEquals(1, repo.stored().modelNrRaw)
+    }
+
+    @Test
     fun `fan speed and the up-down vane are written, the rest of the state kept`() = runBlocking {
         val repo = repository()
         repo.add("127.0.0.1")
@@ -238,6 +281,8 @@ class RepositoryTest {
     }
 
     private fun storedTimer() = repository().units.value.units.single().timer
+
+    private fun Repository.stored() = units.value.units.single { it.airconId == ID }
 
     @Test
     fun `an unreachable unit is retried ever less often until 75 minutes after the switch-off time`() = runBlocking {

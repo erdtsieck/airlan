@@ -13,8 +13,9 @@ Per unit you can:
 - choose cooling or heating
 - set the temperature (16–30 °C in 0.5° steps)
 - have it switch off automatically after 15 or 30 minutes or 1–6 hours
-- set the fan speed (auto or 1–4) and the up/down direction (swing or 1–4), at the bottom
-  of the screen
+- set the fan speed (auto, quiet, low, medium, high) and the direction, at the bottom of the
+  screen: up/down (swing, or highest to lowest) and, on units that have them, left/right
+  (swing, five directions, wide or narrow) and 3D auto, which aims both vanes itself
 
 That is all, on purpose. Indoor and outdoor temperature are shown along the way, and with
 more than one unit a compact tile per unit shows at a glance which ones run. Both
@@ -165,7 +166,7 @@ with your result (the firmware branch and versions are in the `getAirconStat` re
 |---|---|
 | `GET /api/units` | All units with their current state; `name` is `null` until the user names it |
 | `POST /api/units` | Body `{ "host": "192.168.1.50" }`: add the unit at that address |
-| `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `fanSpeed` (`"auto"` or 1–4), `vane` (up/down direction: `"swing"` or 1–4, 1 at the top), `name` |
+| `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `fanSpeed` (`"auto"` or 1–4: quiet, low, medium, high), `vane` (up/down direction: `"swing"` or 1–4, highest to lowest), `vaneLR` (left/right direction: `"swing"`, 1–5 from left to right, 6 wide, 7 narrow), `"3d"` as `vane` and/or `vaneLR` for 3D auto, `name`. `vaneLR` is `null`, and `vaneLR` and `"3d"` are refused, for a unit that does not report its left/right vane (see below) |
 | `PUT /api/units/order` | Body `{ "order": ["<airconId>", …] }`: the order of the units; units left out keep theirs after the named ones |
 | `DELETE /api/units/:id` | Forget the unit |
 | `PUT /api/units/:id/timer` | Body `{ "minutes": 1–360 }`: switch off after that time |
@@ -205,6 +206,11 @@ Errors come back as `{ "error": { "code", "message" } }` with `code` one of
 - **Heating overshoots on purpose.** In heating mode the unit aims for the set temperature
   plus 2 °C, so a thermometer at seating height can read warmer than the setting. That is
   the air conditioner, not AirLAN.
+- **Left/right vane and 3D auto.** Offered once a unit has shown that it reports them. Units
+  with the older bus protocol take the commands but always read back as swinging, so AirLAN
+  cannot show what they are set to and leaves both out; ceiling cassettes have no left/right
+  vane. A unit whose left/right vane is on swing looks the same as such a unit until it is
+  set to a direction once, with its remote control or another app.
 - **One request at a time.** The module accepts one connection at a time and about one
   request per second. AirLAN queues requests per unit.
 - **No `fetch`.** The module only reads a request body that arrives in the same TCP packet

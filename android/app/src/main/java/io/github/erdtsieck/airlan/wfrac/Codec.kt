@@ -31,9 +31,22 @@ data class AirconState(
     val errorCode: String? = null,
     val indoorTemp: Double? = null,
     val outdoorTemp: Double? = null,
+    /**
+     * False when byte 12 reads exactly 1. The module pins it there on units with the legacy
+     * bus signature, which then never report their left/right vane or 3D auto; but it is also
+     * what an extended unit with its left/right vane on swing reports. Anything else proves
+     * that the unit reports both.
+     */
+    val vaneLRReported: Boolean = true,
 )
 
 object Codec {
+    /**
+     * Whether a unit's model line has a left/right vane and 3D auto, per the official app's
+     * capability table: every model group except the ceiling cassettes (64).
+     */
+    fun modelHasVaneLR(modelNrRaw: Int) = modelNrRaw != 64
+
     private val CMD_AIRFLOW = intArrayOf(0x0f, 0x08, 0x09, 0x0a, 0x0e)
     private val RCV_AIRFLOW = intArrayOf(0x07, 0x00, 0x01, 0x02, 0x06)
     private val CMD_WIND_UD = arrayOf(192 to 128, 128 to 128, 128 to 144, 128 to 160, 128 to 176)
@@ -97,6 +110,7 @@ object Codec {
             },
             indoorTemp = indoor,
             outdoorTemp = outdoor,
+            vaneLRReported = c[12] != 1,
         )
     }
 

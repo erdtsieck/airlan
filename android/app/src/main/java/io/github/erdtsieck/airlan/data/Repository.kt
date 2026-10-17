@@ -131,7 +131,15 @@ class Repository(
         }
     }
 
-    suspend fun state(airconId: String): AirconState = withUnit(airconId) { it.getStat(airconId) }
+    suspend fun state(airconId: String): AirconState =
+        withUnit(airconId) { it.getStat(airconId) }.also { noteAirflowSupport(airconId, it) }
+
+    /** Remembers the model group, and that the unit reports its left/right vane once it has shown so. */
+    private suspend fun noteAirflowSupport(airconId: String, s: AirconState) {
+        val unit = store.unit(airconId) ?: return
+        if (unit.modelNrRaw == s.modelNrRaw && (unit.reportsVaneLR || !s.vaneLRReported)) return
+        store.updateUnit(airconId) { it.copy(modelNrRaw = s.modelNrRaw, reportsVaneLR = it.reportsVaneLR || s.vaneLRReported) }
+    }
 
     /** Writes need an account registered with the unit; registering the same id again is idempotent. */
     /**
@@ -210,6 +218,7 @@ class Repository(
                 throw if (left > 0) busy(airconId, left, again.result) else again
             }
         }
+        noteAirflowSupport(airconId, written)
         if (!written.power) cancelTimer(airconId)
         return written
     }
