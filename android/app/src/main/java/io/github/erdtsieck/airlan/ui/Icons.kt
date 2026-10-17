@@ -34,6 +34,9 @@ object AirIcons {
     val up = stroke(2f, "M6 15l6-6l6 6")
     val down = stroke(2f, "M6 9l6 6l6-6")
     val edit = stroke(2f, "M4 20h4L19 9l-4-4L4 16z")
+    val cube = stroke(2f, "M12 3l8 4.5v9L12 21l-8-4.5v-9z", "M12 12l8-4.5M12 12v9M12 12L4 7.5")
+    val swingUpDown = stroke(2f, "M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4")
+    val swingLeftRight = stroke(2f, "M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4")
     val gear = stroke(
         2f,
         "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z",

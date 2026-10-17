@@ -80,14 +80,22 @@ def state(lang_living, lang_bed, lang_study):
     sh(f"run-as {PKG} cp /data/local/tmp/s.json files/state.json")
 
 
-def shot(name, lang):
+def shot(name, lang, bottom=False):
+    """Captures the screen; keeps the top 1080x1920, or with `bottom` the lowest."""
     time.sleep(4)
     raw = os.path.join(TMP, f"{lang}-{name}.png")
     with open(raw, "wb") as f:
         f.write(subprocess.run([ADB, "-s", SERIAL, "exec-out", "screencap", "-p"], capture_output=True, check=True).stdout)
     img = Image.open(raw)
     assert img.size == (1080, 2400), img.size
-    img.crop((0, 0, 1080, 1920)).save(os.path.join(OUT, lang, f"{name}.png"), optimize=True)
+    box = (0, 2400 - 1920, 1080, 2400) if bottom else (0, 0, 1080, 1920)
+    img.crop(box).save(os.path.join(OUT, lang, f"{name}.png"), optimize=True)
+
+
+def scroll(down):
+    for _ in range(4):
+        sh("input swipe 500 1800 500 300 200" if down else "input swipe 500 400 500 1900 200")
+        time.sleep(0.4)
 
 
 def demo_status_bar():
@@ -120,6 +128,9 @@ for lang in ("en", "nl"):
     time.sleep(6)
     tap_text(living)
     shot("1-living-room", lang)
+    scroll(down=True)
+    shot("5-airflow", lang, bottom=True)
+    scroll(down=False)
     tap_text(bed)
     shot("2-bedroom", lang)
     tap_text("Manage units" if lang == "en" else "Airco’s beheren")

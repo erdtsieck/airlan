@@ -29,20 +29,53 @@ const ICONS = {
   up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6l6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6-6"/></svg>',
   edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  cube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
+  swingUD: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/></svg>',
+  swingLR: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"/></svg>',
 };
 // Fan speed: 'auto' or a manual step, quiet to high. The up/down vane: 'swing' or a fixed
 // position, highest to lowest. The left/right vane: 'swing', 1–5 from left to right, 6 spread
 // out, 7 pointed inwards. '3d' (3D auto) hands both vanes to the unit; only for units that
 // report their left/right vane (vaneLR is null for the others).
-const FAN_SPEEDS = ['auto', 1, 2, 3, 4];
-const VANES = ['swing', 1, 2, 3, 4];
-const VANES_LR = ['swing', 1, 2, 3, 4, 5, 6, 7];
 const parseSetting = (s) => /^\d$/.test(s) ? Number(s) : s;
 const label = (prefix) => (v) => v === null || v === undefined ? '–' : v === '3d' ? t('auto3d') : t(`${prefix}_${v}`);
 const fanLabel = label('fan');
 const vaneLabel = label('vane');
 const vaneLRLabel = label('vaneLR');
 const TIMER_MINUTES = [15, 30, 60, 120, 180, 240, 300, 360];
+
+// The airflow drawings. Each vane position is a ray from a pivot; the rays' ends lie on an
+// ellipse, so the fan fits its box. A tap anywhere in the drawing picks the nearest ray.
+// Up/down, side view: the unit's body top left, rays from just below the horizontal (highest)
+// to steep (lowest). Left/right, top view: rays from the pivot at the bottom, left to right.
+const FAN_UD = { w: 112, h: 64, px: 16, py: 12, a: 90, b: 50, angles: [6, 24, 42, 60] };
+const FAN_LR = { w: 120, h: 60, px: 60, py: 56, a: 54, b: 50, angles: [-66, -33, 0, 33, 66] };
+const rayEnd = (f, deg) => {
+  const r = (deg * Math.PI) / 180;
+  return f === FAN_UD ? [f.px + f.a * Math.cos(r), f.py + f.b * Math.sin(r)] : [f.px + f.a * Math.sin(r), f.py - f.b * Math.cos(r)];
+};
+/** The index of the ray nearest to a point in the drawing's own coordinates. */
+function nearestRay(f, x, y) {
+  const angle = f === FAN_UD
+    ? (Math.atan2((y - f.py) / f.b, (x - f.px) / f.a) * 180) / Math.PI
+    : (Math.atan2((x - f.px) / f.a, (f.py - y) / f.b) * 180) / Math.PI;
+  return f.angles.reduce((best, a, i) => (Math.abs(a - angle) < Math.abs(f.angles[best] - angle) ? i : best), 0);
+}
+/**
+ * A fan of rays. `lit` are the rays drawn in the accent colour, `dot` the one with an end
+ * dot; `faint` draws every ray half-transparent in the accent (swinging, 3D auto). Every ray
+ * is also a button for keyboards and screen readers.
+ */
+function fanSvg(id, f, { lit = [], dot = null, faint = false, labels, pressed, disabled }) {
+  const rays = f.angles.map((deg, i) => {
+    const [x, y] = rayEnd(f, deg).map((n) => n.toFixed(1));
+    const cls = faint ? 'faint' : lit.includes(i) ? 'lit' : 'idle';
+    const end = dot === i ? `<circle class="end" cx="${x}" cy="${y}" r="4"/>` : '';
+    return `<g role="button" tabindex="${disabled ? -1 : 0}" data-ray="${i}" aria-label="${escape(labels[i])}" aria-pressed="${pressed(i)}"><line class="${cls}" x1="${f.px}" y1="${f.py}" x2="${x}" y2="${y}"/>${end}</g>`;
+  }).join('');
+  const body = f === FAN_UD ? '<rect class="body" x="0" y="2" width="28" height="11" rx="3"/>' : '';
+  return `<svg class="fan${disabled ? ' disabled' : ''}" id="${id}" width="${f.w}" height="${f.h}" viewBox="0 0 ${f.w} ${f.h}" role="group">${body}${rays}</svg>`;
+}
 const TEMP_MIN = 16, TEMP_MAX = 30;
 
 let units = [];
@@ -171,13 +204,79 @@ function overflows(el) {
   return range.getBoundingClientRect().width > room + 0.5;
 }
 
-/** Lays out every row of equal buttons; rows of options prefer counts that leave no orphans. */
+/** Lays out every row of equal buttons. */
 function fitAll() {
   fitColumns(document.querySelector('.modes'), 2);
   fitColumns(document.querySelector('.chips'), 4);
-  fitColumns($('fan'), [5, 3, 2]);
-  fitColumns($('vane'), $('vane')?.children.length === 6 ? [6, 3, 2] : [5, 3, 2]);
-  fitColumns($('vaneLR'), [3, 2]);
+}
+
+/**
+ * Fan speed and the vanes, as drawings: rows of a label with the current value on the left
+ * and the control on the right (below the label when they do not fit side by side). 3D auto,
+ * which aims both vanes, is a toggle in the header; the left/right rows and the toggle are
+ * only there for units that report a left/right vane (vaneLR is null for the others).
+ */
+function airflowCard(u, off) {
+  const both = u.vaneLR !== null;
+  const auto3d = both && u.vane === '3d';
+  const dis = off ? 'disabled' : '';
+  const accent = u.mode === 'cool' || u.mode === 'heat' ? `var(--${u.mode})` : 'var(--text)';
+  const level = typeof u.fanSpeed === 'number' ? u.fanSpeed : 0;
+  const bars = [1, 2, 3, 4].map((n) => `<button class="bar" data-fan="${n}" aria-label="${escape(fanLabel(n))}" aria-pressed="${u.fanSpeed === n}" ${dis}><span class="${n <= level ? 'lit' : ''}" style="height:${2 + 6 * n}px"></span></button>`).join('');
+  const ud = typeof u.vane === 'number' ? u.vane - 1 : null;
+  const udSvg = fanSvg('fanUD', FAN_UD, {
+    lit: ud === null ? [] : [ud], dot: ud, faint: u.vane === 'swing' || auto3d,
+    labels: [1, 2, 3, 4].map(vaneLabel), pressed: (i) => u.vane === i + 1, disabled: off,
+  });
+  const lr = u.vaneLR;
+  const lrLit = lr === 6 ? [0, 4] : lr === 7 ? [1, 3] : typeof lr === 'number' ? [lr - 1] : [];
+  const lrSvg = both ? fanSvg('fanLR', FAN_LR, {
+    lit: lrLit, dot: typeof lr === 'number' && lr <= 5 ? lr - 1 : null, faint: lr === 'swing' || auto3d,
+    labels: [1, 2, 3, 4, 5].map(vaneLRLabel), pressed: (i) => lr === i + 1, disabled: off,
+  }) : '';
+  const row = (title, value, control, extra = '') => `
+      <div class="af-row${extra}">
+        <div class="af-label"><b>${title}</b>${value !== null ? `<span class="val">${escape(value)}</span>` : ''}</div>
+        <div class="af-ctl">${control}</div>
+      </div>`;
+  const spread = [6, 7].map((v) => `<button class="pill" data-vane-lr="${v}" aria-pressed="${lr === v}" ${dis}>${vaneLRLabel(v)}</button>`).join('');
+  return `
+    <section class="card airflow" style="--flow: ${accent}">
+      <div class="af-head">
+        <h2>${t('airflow')}</h2>
+        ${both ? `<button class="chip3d" id="auto3d" aria-pressed="${auto3d}" ${dis}>${ICONS.cube}${t('auto3d')}</button>` : ''}
+      </div>
+      ${row(t('fanSpeed'), fanLabel(u.fanSpeed), `<button class="pill" data-fan="auto" aria-pressed="${u.fanSpeed === 'auto'}" ${dis}>${t('fan_auto')}</button><div class="bars" role="group" aria-label="${escape(t('fanSpeed'))}">${bars}</div>`)}
+      ${row(t('vane'), vaneLabel(u.vane), `${udSvg}<button class="round" data-vane="swing" aria-label="${escape(t('vane_swing'))}" aria-pressed="${u.vane === 'swing'}" ${dis}>${ICONS.swingUD}</button>`)}
+      ${both ? row(t('vaneLR'), vaneLRLabel(lr), `${lrSvg}<button class="round" data-vane-lr="swing" aria-label="${escape(t('vaneLR_swing'))}" aria-pressed="${lr === 'swing'}" ${dis}>${ICONS.swingLR}</button>`) : ''}
+      ${both ? row(`<span class="minor">${t('spread')}</span>`, null, spread, ' minor-row') : ''}
+    </section>`;
+}
+
+function wireAirflow(u, off) {
+  if (off) return;
+  const set = (body, what, value) => change(body, `${what}: ${value}`);
+  document.querySelectorAll('.airflow [data-fan]').forEach((b) => b.onclick = () => {
+    const f = parseSetting(b.dataset.fan);
+    if (u.fanSpeed !== f) set({ fanSpeed: f }, t('fanSpeed'), fanLabel(f));
+  });
+  const vane = (v) => { if (u.vane !== v) set({ vane: v }, t('vane'), vaneLabel(v)); };
+  const vaneLR = (v) => { if (u.vaneLR !== v) set({ vaneLR: v }, t('vaneLR'), vaneLRLabel(v)); };
+  document.querySelectorAll('.airflow [data-vane]').forEach((b) => b.onclick = () => vane(parseSetting(b.dataset.vane)));
+  document.querySelectorAll('.airflow [data-vane-lr]').forEach((b) => b.onclick = () => vaneLR(parseSetting(b.dataset.vaneLr)));
+  // Off again: back to the position the unit had before is unknown, so the highest.
+  if ($('auto3d')) $('auto3d').onclick = () => (u.vane === '3d' ? vane(1) : set({ vane: '3d' }, t('airflow'), t('auto3d')));
+  for (const [id, f, pick] of [['fanUD', FAN_UD, vane], ['fanLR', FAN_LR, vaneLR]]) {
+    const svg = $(id);
+    if (!svg) continue;
+    svg.onclick = (e) => {
+      const box = svg.getBoundingClientRect();
+      pick(nearestRay(f, ((e.clientX - box.left) * f.w) / box.width, ((e.clientY - box.top) * f.h) / box.height) + 1);
+    };
+    svg.querySelectorAll('[data-ray]').forEach((g) => g.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(Number(g.dataset.ray) + 1); }
+    });
+  }
 }
 
 function escape(s) {
@@ -289,15 +388,7 @@ function render() {
         <p class="hint">${t('turnOnForTimer')}</p>`}
     </section>
 
-    <section class="card airflow">
-      <h2>${t('airflow')}</h2>
-      <h3>${t('fanSpeed')}</h3>
-      <div class="seg" id="fan">${FAN_SPEEDS.map((f) => `<button data-fan="${f}" aria-pressed="${u.fanSpeed === f}" ${off ? 'disabled' : ''}>${fanLabel(f)}</button>`).join('')}</div>
-      <h3>${t('vane')}</h3>
-      <div class="seg" id="vane">${[...VANES, ...(u.vaneLR !== null ? ['3d'] : [])].map((v) => `<button data-vane="${v}" aria-pressed="${u.vane === v}" ${off ? 'disabled' : ''}>${vaneLabel(v)}</button>`).join('')}</div>${u.vaneLR !== null ? `
-      <h3>${t('vaneLR')}</h3>
-      <div class="seg" id="vaneLR">${[...VANES_LR, '3d'].map((v) => `<button data-vane-lr="${v}" aria-pressed="${u.vaneLR === v}" ${off ? 'disabled' : ''}>${vaneLRLabel(v)}</button>`).join('')}</div>` : ''}
-    </section>`;
+    ${airflowCard(u, off)}`;
 
   $('rename').onclick = () => rename(u);
   if ($('nameForm')) $('nameForm').onsubmit = (e) => {
@@ -311,18 +402,7 @@ function render() {
   document.querySelectorAll('.modes button').forEach((b) => b.onclick = () => {
     if (u.mode !== b.dataset.mode) change({ mode: b.dataset.mode }, t(b.dataset.mode));
   });
-  document.querySelectorAll('[data-fan]').forEach((b) => b.onclick = () => {
-    const f = parseSetting(b.dataset.fan);
-    if (u.fanSpeed !== f) change({ fanSpeed: f }, `${t('fanSpeed')}: ${fanLabel(f)}`);
-  });
-  document.querySelectorAll('[data-vane]').forEach((b) => b.onclick = () => {
-    const v = parseSetting(b.dataset.vane);
-    if (u.vane !== v) change({ vane: v }, `${t('vane')}: ${vaneLabel(v)}`);
-  });
-  document.querySelectorAll('[data-vane-lr]').forEach((b) => b.onclick = () => {
-    const v = parseSetting(b.dataset.vaneLr);
-    if (u.vaneLR !== v) change({ vaneLR: v }, `${t('vaneLR')}: ${vaneLRLabel(v)}`);
-  });
+  wireAirflow(u, off);
   document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer(Number(b.dataset.min)));
   if ($('cancel')) $('cancel').onclick = () => timer(null);
   fitAll();

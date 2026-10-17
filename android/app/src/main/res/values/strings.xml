@@ -35,7 +35,7 @@
         <item>High</item>
     </string-array>
     <!-- The up/down vane: swinging, or a fixed position from highest to lowest. -->
-    <string name="vane">Up/down direction</string>
+    <string name="vane">Up/down</string>
     <string-array name="vanes_ud">
         <item>Swing</item>
         <item>Highest</item>
@@ -45,7 +45,9 @@
     </string-array>
     <!-- The left/right vanes: swinging, five directions from left to right, both spread out
          (Wide) or both pointed inwards (Narrow). -->
-    <string name="vane_lr">Left/right direction</string>
+    <string name="vane_lr">Left/right</string>
+    <!-- Both left/right vanes spread out (Wide) or pointed inwards (Narrow). -->
+    <string name="spread">Spread</string>
     <string-array name="vanes_lr">
         <item>Swing</item>
         <item>Left</item>

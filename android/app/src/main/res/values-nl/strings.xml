@@ -32,7 +32,7 @@
         <item>Middel</item>
         <item>Hoog</item>
     </string-array>
-    <string name="vane">Richting op/neer</string>
+    <string name="vane">Op/neer</string>
     <string-array name="vanes_ud">
         <item>Zwenken</item>
         <item>Hoogst</item>
@@ -40,7 +40,8 @@
         <item>Normaal</item>
         <item>Laagst</item>
     </string-array>
-    <string name="vane_lr">Richting links/rechts</string>
+    <string name="vane_lr">Links/rechts</string>
+    <string name="spread">Spreiding</string>
     <string-array name="vanes_lr">
         <item>Zwenken</item>
         <item>Links</item>
