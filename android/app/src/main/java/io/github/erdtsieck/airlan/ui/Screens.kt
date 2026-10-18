@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -69,6 +72,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -78,6 +82,7 @@ import io.github.erdtsieck.airlan.data.aimsBothVanes
 import io.github.erdtsieck.airlan.data.macLabel
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MAX
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MIN
+import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.Mode
 import java.text.DateFormat
 import java.util.Date
@@ -88,7 +93,6 @@ private val TIMER_MINUTES = listOf(15, 30, 60, 120, 180, 240, 300, 360)
 
 private val GAP = 8.dp
 private val CHIP_PADDING = 8.dp
-private val MODE_PADDING = 8.dp
 
 /**
  * Equal buttons side by side, [maxColumns] to a row, or fewer when the longest label would
@@ -165,11 +169,11 @@ internal fun Card(modifier: Modifier = Modifier, accent: Color? = null, content:
     Column(
         modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp)
+            .padding(bottom = 10.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(c.card)
             .border(BorderStroke(1.dp, accent ?: c.line), RoundedCornerShape(20.dp))
-            .padding(20.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         content = content,
     )
 }
@@ -185,6 +189,7 @@ private fun Pill(
     icon: ImageVector? = null,
     shape: RoundedCornerShape = RoundedCornerShape(12.dp),
     horizontalPadding: Dp = 14.dp,
+    verticalPadding: Dp = 11.dp,
 ) {
     val c = LocalAirColors.current
     Row(
@@ -193,7 +198,7 @@ private fun Pill(
             .background(filled ?: c.card)
             .border(1.dp, filled ?: c.line, shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = horizontalPadding, vertical = 11.dp),
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -339,12 +344,7 @@ fun UnitScreen(
         }
     }
 
-    val accent = when {
-        s?.power != true -> c.off
-        s.mode == Mode.COOL -> c.cool
-        s.mode == Mode.HEAT -> c.heat
-        else -> c.off
-    }
+    val accent = if (s?.power == true) c.of(s.mode) else c.off
     Card {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -378,42 +378,40 @@ fun UnitScreen(
                 AirIcons.power,
                 stringResource(if (s?.power == true) R.string.turn_off else R.string.turn_on),
                 { onPower(s?.power != true) },
-                56.dp,
+                52.dp,
                 enabled = !disabled,
                 filled = if (s?.power == true) accent else c.line,
             )
         }
 
-        val temp = state.pendingTemp ?: s?.presetTemp
-        Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            RoundButton(null, stringResource(R.string.colder), { onNudge(-0.5) }, 64.dp, enabled = !disabled && (temp ?: 0.0) > TEMP_MIN, text = "−")
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (s == null) "–" else fmt(temp) + "°", fontSize = 60.sp, fontWeight = FontWeight.Light, color = accent)
-                Text(stringResource(if (s?.power == true) R.string.set else R.string.off), color = c.muted, fontSize = 13.sp)
+        // Fan only has no temperature to set: one quiet line instead of the setpoint.
+        if (s?.mode == Mode.FAN) {
+            Text(
+                stringResource(R.string.fan_no_temp),
+                color = c.muted,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 6.dp),
+            )
+        } else {
+            val temp = state.pendingTemp ?: s?.presetTemp
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                RoundButton(null, stringResource(R.string.colder), { onNudge(-0.5) }, 56.dp, enabled = !disabled && (temp ?: 0.0) > TEMP_MIN, text = "−")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (s == null) "–" else fmt(temp) + "°", fontSize = 52.sp, fontWeight = FontWeight.Light, color = accent, lineHeight = 56.sp)
+                    // Which mode the unit runs in, in its colour; "off" when it is off.
+                    Text(
+                        if (s?.power == true) modeName(s.mode).lowercase(LocalConfiguration.current.locales[0]) else stringResource(R.string.off),
+                        color = if (s?.power == true) accent else c.muted,
+                        fontSize = 13.sp,
+                        fontWeight = if (s?.power == true) FontWeight.Medium else FontWeight.Normal,
+                    )
+                }
+                RoundButton(null, stringResource(R.string.warmer), { onNudge(0.5) }, 56.dp, enabled = !disabled && (temp ?: 99.0) < TEMP_MAX, text = "+")
             }
-            RoundButton(null, stringResource(R.string.warmer), { onNudge(0.5) }, 64.dp, enabled = !disabled && (temp ?: 99.0) < TEMP_MAX, text = "+")
         }
 
-        val modes = listOf(Triple(Mode.COOL, AirIcons.cool, c.cool), Triple(Mode.HEAT, AirIcons.heat, c.heat))
-        val modeLabels = modes.map { modeName(it.first) }
-        // Padding, icon and the gap after it, border: see Pill. The padding is kept tight: at
-        // 360dp and font 1.0 the longer label with its icon must still fit beside the other.
-        FittingGrid(modeLabels, maxColumns = 2, chrome = MODE_PADDING * 2 + 20.dp + 8.dp + 2.dp, Modifier.padding(top = 12.dp)) { i, modifier ->
-            val (mode, icon, color) = modes[i]
-            Pill(
-                modeLabels[i],
-                { if (s?.mode != mode) onMode(mode) },
-                modifier,
-                enabled = !disabled,
-                filled = if (s?.mode == mode) color else null,
-                icon = icon,
-                shape = RoundedCornerShape(14.dp),
-                horizontalPadding = MODE_PADDING,
-            )
-        }
-        if (s != null && s.mode != Mode.COOL && s.mode != Mode.HEAT) {
-            Text(stringResource(R.string.current_mode, modeName(s.mode)), color = c.muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-        }
+        ModeSelector(s, enabled = !disabled, onMode, Modifier.padding(top = 14.dp))
     }
 
     Card {
@@ -446,7 +444,7 @@ fun UnitScreen(
             s?.power == true -> {
                 val labels = TIMER_MINUTES.map { m -> if (m < 60) stringResource(R.string.minutes_short, m) else stringResource(R.string.hours_short, m / 60) }
                 FittingGrid(labels, maxColumns = 4, chrome = CHIP_PADDING * 2 + 2.dp) { i, modifier ->
-                    Pill(labels[i], { onTimer(TIMER_MINUTES[i]) }, modifier, enabled = !disabled, horizontalPadding = CHIP_PADDING)
+                    Pill(labels[i], { onTimer(TIMER_MINUTES[i]) }, modifier, enabled = !disabled, horizontalPadding = CHIP_PADDING, verticalPadding = 9.dp)
                 }
             }
             else -> Hint(stringResource(R.string.turn_on_for_timer))
@@ -461,6 +459,63 @@ fun UnitScreen(
         RenameDialog(unit.stored.name ?: "", onDismiss = { renaming = false }) {
             renaming = false
             onRename(unit.stored.airconId, it)
+        }
+    }
+}
+
+private val MODES = listOf(
+    Mode.AUTO to AirIcons.auto,
+    Mode.COOL to AirIcons.cool,
+    Mode.HEAT to AirIcons.heat,
+    Mode.DRY to AirIcons.dry,
+    Mode.FAN to AirIcons.fan,
+)
+
+/**
+ * The five operating modes as one segmented row of icons, in the order of the remote. The
+ * current mode is filled in its colour (outlined while the unit is off); its name is under the
+ * setpoint, so no label has to fit a fifth of the width. Each icon is named for screen readers.
+ */
+@Composable
+private fun ModeSelector(s: AirconState?, enabled: Boolean, onMode: (Mode) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalAirColors.current
+    val track = RoundedCornerShape(16.dp)
+    val groupLabel = stringResource(R.string.mode)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = groupLabel }
+            .clip(track)
+            .background(c.bg)
+            .border(1.dp, c.line, track)
+            .padding(4.dp)
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for ((mode, icon) in MODES) {
+            val selected = s?.mode == mode
+            val color = c.of(mode)
+            val on = s?.power == true
+            val shape = RoundedCornerShape(12.dp)
+            val name = modeName(mode)
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .clip(shape)
+                    .background(if (selected && on) color else if (selected) c.card else Color.Transparent)
+                    .border(if (selected && !on) 1.5.dp else 0.dp, if (selected && !on) color else Color.Transparent, shape)
+                    .selectable(selected, enabled = enabled, role = Role.RadioButton) { if (!selected) onMode(mode) }
+                    .semantics { contentDescription = name },
+                contentAlignment = Alignment.Center,
+            ) {
+                val tint = when {
+                    selected && on -> Color.White
+                    selected -> color
+                    else -> c.muted
+                }
+                Icon(icon, null, tint = tint.copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
@@ -519,12 +574,7 @@ private fun UnitTile(state: UiState, u: UnitUi, selected: Boolean, modifier: Mod
     val c = LocalAirColors.current
     val s = u.state
     val on = s?.power == true
-    val color = when {
-        !on -> c.off
-        s.mode == Mode.HEAT -> c.heat
-        s.mode == Mode.COOL -> c.cool
-        else -> c.text
-    }
+    val color = if (on) c.of(s.mode) else c.off
     val unreachable = s == null && (u.error != null || u.needsPermission)
     val standing = when {
         on -> stringResource(R.string.tile_on, modeName(s.mode))
@@ -648,6 +698,7 @@ fun ManageScreen(
     onRename: (String, String) -> Unit,
     onMove: (String, Int) -> Unit,
     onForget: (String) -> Unit,
+    onShareDiagnostics: (String) -> Unit,
 ) = Page {
     val c = LocalAirColors.current
     var renaming by remember { mutableStateOf<UnitUi?>(null) }
@@ -696,6 +747,19 @@ fun ManageScreen(
                     if (b == 0) Pill(actions[0], { renaming = u }, modifier, horizontalPadding = CHIP_PADDING)
                     else Pill(actions[1], { forgetting = u }, modifier, textColor = c.danger, horizontalPadding = CHIP_PADDING)
                 }
+                // Needed rarely, so a quiet link rather than a third button.
+                Text(
+                    stringResource(R.string.share_diagnostics),
+                    color = c.muted,
+                    fontSize = 14.sp,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button) { onShareDiagnostics(u.stored.airconId) }
+                        .heightIn(min = 40.dp)
+                        .padding(horizontal = 4.dp, vertical = 10.dp),
+                )
             }
         }
         if (state.networkAllowed) {

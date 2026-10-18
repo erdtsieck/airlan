@@ -3,6 +3,7 @@ package io.github.erdtsieck.airlan.ui
 import android.app.Application
 import android.util.Log
 import androidx.annotation.StringRes
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.erdtsieck.airlan.R
@@ -176,6 +177,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun move(airconId: String, by: Int) = viewModelScope.launch { repo.move(airconId, by) }
+
+    /** A plain-text report about a unit for the user to share; nothing personal in it. */
+    fun diagnostics(airconId: String): String {
+        val app = getApplication<Application>()
+        val version = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "?"
+        val state = live.value[airconId]?.getOrNull()
+        return repo.diagnostics(airconId, version, "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", state)
+    }
 
     fun forget(airconId: String) = viewModelScope.launch {
         live.update { it - airconId }

@@ -87,3 +87,24 @@ test('requests to one unit are serialised and spaced out', async (t) => {
   const gaps = unit.requests.slice(1).map((r, i) => r.at - unit.requests[i].at);
   assert.ok(gaps.every((g) => g >= 140), `gaps ${gaps}`);
 });
+
+test('records every request and its outcome for diagnostics', async (t) => {
+  const ok = await fakeUnit('http');
+  const refusing = await fakeUnit('http', { result: 2 });
+  t.after(() => { ok.server.close(); refusing.server.close(); });
+  const a = client(ok.port, { scheme: 'http' });
+  await a.getDeviceInfo();
+  const b = client(refusing.port, { scheme: 'http' });
+  await assert.rejects(b.getDeviceInfo());
+  const gone = client(1, { scheme: 'http' });
+  await assert.rejects(gone.getDeviceInfo());
+
+  const [first] = a.trace.entries();
+  assert.equal(first.command, 'getDeviceInfo');
+  assert.equal(first.result, 0);
+  assert.equal(first.error, null);
+  assert.equal(b.trace.entries()[0].result, 2);
+  const [failed] = gone.trace.entries();
+  assert.equal(failed.result, null);
+  assert.ok(failed.error);
+});

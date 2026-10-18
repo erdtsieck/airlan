@@ -59,6 +59,8 @@ class DemoClient(private val now: () -> Long = System::currentTimeMillis) : Airc
         val (target, perMinute) = when {
             s.power && s.mode == Mode.COOL -> min(s.presetTemp, ROOM_TEMP) to RUNNING_RATE
             s.power && s.mode == Mode.HEAT -> max(s.presetTemp, ROOM_TEMP) to RUNNING_RATE
+            // Auto cools or heats towards the setpoint, whichever way it lies.
+            s.power && s.mode == Mode.AUTO -> s.presetTemp to RUNNING_RATE
             else -> ROOM_TEMP to IDLE_RATE
         }
         val step = min(abs(target - indoor), perMinute * minutes)

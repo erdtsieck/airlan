@@ -25,6 +25,9 @@ const ICONS = {
   power: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>',
   cool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11"/><path d="M9 4l3 2.5L15 4M9 20l3-2.5L15 20"/></svg>',
   heat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',
+  auto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 3.5v3.5h-3.5"/><path d="M8.8 16l3.2-8l3.2 8M10 13.2h4"/></svg>',
+  dry: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2c3.4 4 5.8 7.3 5.8 10.3a5.8 5.8 0 0 1-11.6 0c0-3 2.4-6.3 5.8-10.3z"/><path d="M9.3 14.2a2.8 2.8 0 0 0 2.4 2.6"/></svg>',
+  fan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.4"/><path d="M12 9.6c-.6-2.8.2-5.9 2.8-6.3c2.4-.3 3 2.5 1.2 4.2c-1.1 1-2.4 1.6-4 2.1z"/><path d="M14.1 13.2c2.7-.9 5.9-.1 6.8 2.4c.8 2.3-2 3.6-4 2.2c-1.2-.9-2.2-2.4-2.8-4.6z"/><path d="M9.9 13.2c-2.1 2-5.2 2.9-6.9.8c-1.5-1.9.6-4 3-3.2c1.4.5 2.7 1.3 3.9 2.4z"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6l6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6-6"/></svg>',
@@ -43,6 +46,9 @@ const fanLabel = label('fan');
 const vaneLabel = label('vane');
 const vaneLRLabel = label('vaneLR');
 const TIMER_MINUTES = [15, 30, 60, 120, 180, 240, 300, 360];
+// The operating modes in the order of the remote; each has a colour (--auto, --cool, ...).
+const MODES = ['auto', 'cool', 'heat', 'dry', 'fan'];
+const modeColor = (mode) => MODES.includes(mode) ? `var(--${mode})` : 'var(--text)';
 
 // The airflow drawings. Each vane position is a ray from a pivot; the rays' ends lie on an
 // ellipse, so the fan fits its box. A tap anywhere in the drawing picks the nearest ray.
@@ -168,6 +174,30 @@ function nudgeTemp(delta) {
   }, 700);
 }
 
+/**
+ * A plain-text report about a unit (nothing personal in it) for the user to send to the
+ * developer: through the share sheet where there is one, else onto the clipboard.
+ */
+async function shareDiagnostics(airconId) {
+  try {
+    const res = await fetch(`/api/units/${airconId}/diagnostics`);
+    if (!res.ok) throw { code: 'server' };
+    const text = await res.text();
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: t('diagnosticsTitle'), text });
+        return;
+      } catch (e) {
+        if (e?.name === 'AbortError') return;
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    setStatus(t('diagnosticsCopied'));
+  } catch (e) {
+    setStatus(errorText(e), true);
+  }
+}
+
 function rename(u = unit()) {
   const name = prompt(t('renamePrompt'), u.name ?? '');
   if (name && name.trim() && name.trim() !== u.name) change({ name: name.trim() }, t('saving'), u);
@@ -206,7 +236,6 @@ function overflows(el) {
 
 /** Lays out every row of equal buttons. */
 function fitAll() {
-  fitColumns(document.querySelector('.modes'), 2);
   fitColumns(document.querySelector('.chips'), 4);
 }
 
@@ -220,7 +249,7 @@ function airflowCard(u, off) {
   const both = u.vaneLR !== null;
   const auto3d = both && u.vane === '3d';
   const dis = off ? 'disabled' : '';
-  const accent = u.mode === 'cool' || u.mode === 'heat' ? `var(--${u.mode})` : 'var(--text)';
+  const accent = modeColor(u.mode);
   const level = typeof u.fanSpeed === 'number' ? u.fanSpeed : 0;
   const bars = [1, 2, 3, 4].map((n) => `<button class="bar" data-fan="${n}" aria-label="${escape(fanLabel(n))}" aria-pressed="${u.fanSpeed === n}" ${dis}><span class="${n <= level ? 'lit' : ''}" style="height:${2 + 6 * n}px"></span></button>`).join('');
   const ud = typeof u.vane === 'number' ? u.vane - 1 : null;
@@ -285,15 +314,14 @@ function escape(s) {
 
 /** A unit's tile: a dot for how it stands, its name, and its set temperature when on. */
 function tile(u) {
-  const known = u.mode === 'cool' || u.mode === 'heat' ? u.mode : 'other';
   const [dot, standing] = !u.online ? ['unreachable', t('unreachable')]
     : !u.power ? ['', t('tileOff')]
-    : [`on ${known}`, t('tileOn', { mode: t(u.mode) })];
+    : ['on', t('tileOn', { mode: t(u.mode) })];
   return `
-    <button role="tab" aria-selected="${u.airconId === selected}" data-id="${u.airconId}">
+    <button role="tab" aria-selected="${u.airconId === selected}" data-id="${u.airconId}" style="--mode: ${modeColor(u.mode)}">
       <span class="tile-dot"><span class="dot ${dot}" role="img" aria-label="${escape(standing)}"></span></span>
       <span class="tile-body"><span class="tile-name">${escape(displayName(u))}</span>${
-        u.online && u.power ? `<span class="tile-temp ${known}">${fmt(u.presetTemp)}°</span>` : ''}</span>
+        u.online && u.power ? `<span class="tile-temp">${fmt(u.presetTemp)}°</span>` : ''}</span>
     </button>`;
 }
 
@@ -324,7 +352,7 @@ function render() {
   const u = unit();
   if (screen === 'manage' || !u) return renderManage();
 
-  const accent = u.power && (u.mode === 'cool' || u.mode === 'heat') ? `var(--${u.mode})` : 'var(--off)';
+  const accent = u.power ? modeColor(u.mode) : 'var(--off)';
   document.documentElement.style.setProperty('--accent', accent);
   const off = !u.online || busy;
   const temp = pendingTemp ?? u.presetTemp;
@@ -362,17 +390,17 @@ function render() {
         <button class="power ${u.power ? 'on' : ''}" id="power" ${off ? 'disabled' : ''} aria-label="${u.power ? t('turnOff') : t('turnOn')}" aria-pressed="${!!u.power}">${ICONS.power}</button>
       </div>
 
+      ${u.mode === 'fan' ? `<p class="no-temp">${t('fanNoTemp')}</p>` : `
       <div class="temp">
         <button id="down" ${off || temp <= TEMP_MIN ? 'disabled' : ''} aria-label="${t('colder')}">−</button>
-        <div class="setpoint"><b>${u.online ? fmt(temp) + '°' : '–'}</b><small>${u.power ? t('set') : t('off')}</small></div>
+        <div class="setpoint"><b>${u.online ? fmt(temp) + '°' : '–'}</b><small class="${u.power ? 'on' : ''}">${u.power ? t(u.mode).toLocaleLowerCase(locale) : t('off')}</small></div>
         <button id="up" ${off || temp >= TEMP_MAX ? 'disabled' : ''} aria-label="${t('warmer')}">+</button>
-      </div>
+      </div>`}
 
-      <div class="modes">
-        ${['cool', 'heat'].map((m) => `
-          <button data-mode="${m}" aria-pressed="${u.mode === m}" ${off ? 'disabled' : ''}>${ICONS[m]}${t(m)}</button>`).join('')}
+      <div class="modes${u.power ? ' on' : ''}" role="radiogroup" aria-label="${t('mode')}">
+        ${MODES.map((m) => `
+          <button role="radio" data-mode="${m}" aria-checked="${u.mode === m}" aria-label="${t(m)}" title="${t(m)}" style="--mode: var(--${m})" ${off ? 'disabled' : ''}>${ICONS[m]}</button>`).join('')}
       </div>
-      ${u.online && u.mode !== 'cool' && u.mode !== 'heat' ? `<p class="other-mode">${t('currentMode', { mode: t(u.mode) })}</p>` : ''}
     </section>
 
 
@@ -397,8 +425,8 @@ function render() {
     if (name) change({ name }, t('saving'));
   };
   $('power').onclick = () => change({ power: !u.power }, u.power ? t('turnOff') : t('turnOn'));
-  $('down').onclick = () => nudgeTemp(-0.5);
-  $('up').onclick = () => nudgeTemp(0.5);
+  if ($('down')) $('down').onclick = () => nudgeTemp(-0.5);
+  if ($('up')) $('up').onclick = () => nudgeTemp(0.5);
   document.querySelectorAll('.modes button').forEach((b) => b.onclick = () => {
     if (u.mode !== b.dataset.mode) change({ mode: b.dataset.mode }, t(b.dataset.mode));
   });
@@ -426,6 +454,7 @@ function renderManage() {
             <button class="btn" data-rename="${u.airconId}">${t('rename')}</button>
             <button class="btn danger" data-forget="${u.airconId}">${t('forget')}</button>
           </div>
+          <button class="link" data-diagnostics="${u.airconId}">${t('shareDiagnostics')}</button>
         </div>`).join('') : `<p class="hint">${t('noUnits')}</p>`}
       <div class="field"><button class="btn primary" id="scan">${t('searchNetwork')}</button></div>
     </section>
@@ -480,6 +509,7 @@ function renderManage() {
     }
   });
   document.querySelectorAll('[data-rename]').forEach((b) => b.onclick = () => rename(units.find((u) => u.airconId === b.dataset.rename)));
+  document.querySelectorAll('[data-diagnostics]').forEach((b) => b.onclick = () => shareDiagnostics(b.dataset.diagnostics));
   document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = async () => {
     const u = units.find((x) => x.airconId === b.dataset.forget);
     if (!confirm(t('forgetConfirm', { name: displayName(u) }))) return;

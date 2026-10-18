@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WfRacClient, WfRacError, MODE_NAMES, PORT as WFRAC_PORT, modelHasVaneLR } from './wfrac.js';
+import { WfRacClient, WfRacError, RequestTrace, MODE_NAMES, PORT as WFRAC_PORT, modelHasVaneLR } from './wfrac.js';
+import { report as diagnosticsReport } from './diagnostics.js';
 import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
 import { browse } from './mdns.js';
 import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from './timer-policy.js';
@@ -18,6 +19,7 @@ import { reorder } from './unit-order.js';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = join(process.env.AIRLAN_DATA_DIR ?? join(ROOT, 'data'), 'state.json');
 const PUBLIC = join(ROOT, 'public');
+const SERVER_VERSION = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')).version;
 const HTTP_PORT = Number(process.env.AIRLAN_PORT ?? 8321);
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const TEMP_MIN = 16;
@@ -117,11 +119,13 @@ function scan() {
 const ids = () => ({ deviceId: store.deviceId });
 const clients = new Map();
 const cache = new Map(); // airconId -> { at, contents, state }
+const traces = new Map(); // airconId -> RequestTrace, kept across clients for the diagnostics report
 
 function clientFor(unit) {
   let c = clients.get(unit.airconId);
   if (!c || c.host !== unit.host) {
-    c = new WfRacClient({ host: unit.host, scheme: unit.scheme, ...ids() });
+    if (!traces.has(unit.airconId)) traces.set(unit.airconId, new RequestTrace());
+    c = new WfRacClient({ host: unit.host, scheme: unit.scheme, ...ids(), trace: traces.get(unit.airconId) });
     clients.set(unit.airconId, c);
   }
   return c;
@@ -464,6 +468,22 @@ async function route(req, res) {
     return send(200, await Promise.all(store.units.map(unitView)));
   }
 
+  const d = pathname.match(/^\/api\/units\/([0-9a-f]{12})\/diagnostics$/);
+  if (d && req.method === 'GET') {
+    const unit = findUnit(d[1]);
+    const state = cache.get(unit.airconId)?.state;
+    const text = diagnosticsReport({
+      version: SERVER_VERSION,
+      platform: `Node ${process.version}, ${process.platform}`,
+      unit,
+      state: state && { ...state, mode: MODE_NAMES[state.mode] },
+      trace: traces.get(unit.airconId) ?? null,
+    });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(text);
+    return;
+  }
+
   const m = pathname.match(/^\/api\/units\/([0-9a-f]{12})(\/timer)?$/);
   if (m) {
     const unit = findUnit(m[1]);
@@ -473,6 +493,7 @@ async function route(req, res) {
       store.units.splice(store.units.indexOf(unit), 1);
       clients.delete(unit.airconId);
       cache.delete(unit.airconId);
+      traces.delete(unit.airconId);
       await saveStore();
       log(`forgot unit ${unit.airconId}`);
       res.writeHead(204).end();

@@ -15,12 +15,12 @@
 <style>
   :root {
     --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5ea;
-    --cool: #1d7fe0; --heat: #e8641b; --off: #9aa1ad; --danger: #c62828;
+    --cool: #1d7fe0; --heat: #e8641b; --auto: #16a34a; --dry: #0d9488; --fan: #7c3aed; --off: #9aa1ad; --danger: #c62828;
     --accent: var(--off);
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #0f1115; --card: #191c22; --text: #eef0f3; --muted: #9098a5; --line: #2a2e36;
-            --cool: #4ea3ff; --heat: #ff8a3d; --off: #5d6470; --danger: #ff6b6b; }
+            --cool: #4ea3ff; --heat: #ff8a3d; --auto: #4ade80; --dry: #2dd4bf; --fan: #a78bfa; --off: #5d6470; --danger: #ff6b6b; }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
@@ -44,50 +44,49 @@
   .tile-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 6px; line-height: 20px; }
   .tile-name { flex: 1 0 auto; max-width: 100%; font-weight: 550; font-size: 15px; }
   .tile-temp { margin-left: auto; font-size: 14px; font-weight: 550; white-space: nowrap; }
-  .tile-temp.cool { color: var(--cool); } .tile-temp.heat { color: var(--heat); }
+  .tile-temp { color: var(--mode); }
   .tile-dot .dot { width: 10px; height: 10px; box-sizing: border-box; }
-  .dot.on.cool { background: var(--cool); } .dot.on.heat { background: var(--heat); } .dot.on.other { background: var(--text); }
+  .dot.on { background: var(--mode); }
   .dot.unreachable { background: none; border: 1.5px solid var(--danger); }
   .dot.loading { background: none; border: 1.5px solid var(--off); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
-  .dot.cool { background: var(--cool); } .dot.heat { background: var(--heat); }
 
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 20px; margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px; margin-bottom: 10px; }
   .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .name { font-size: 22px; font-weight: 650; display: flex; align-items: center; gap: 6px; min-width: 0; }
   .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rename { color: var(--muted); padding: 4px; }
   .climate { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
-  .power { width: 56px; height: 56px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center;
+  .power { width: 52px; height: 52px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center;
     background: var(--line); color: var(--muted); transition: background .2s, color .2s; }
   .power.on { background: var(--accent); color: #fff; }
   .power svg { width: 26px; height: 26px; }
 
-  .temp { display: flex; align-items: center; justify-content: space-between; margin: 28px 0 8px; }
-  .temp button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--line); font-size: 30px; line-height: 1; }
+  .temp { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 0; }
+  .temp button { width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--line); font-size: 30px; line-height: 1; }
   .temp button:active:not(:disabled) { background: var(--line); }
   .setpoint { text-align: center; font-variant-numeric: tabular-nums; }
-  .setpoint b { font-size: 64px; font-weight: 300; letter-spacing: -2px; color: var(--accent); transition: color .2s; }
-  .setpoint small { display: block; color: var(--muted); font-size: 13px; margin-top: -6px; }
+  .setpoint b { font-size: 54px; line-height: 60px; font-weight: 300; letter-spacing: -2px; color: var(--accent); transition: color .2s; }
+  .setpoint small { display: block; color: var(--muted); font-size: 13px; }
+  .setpoint small.on { color: var(--accent); font-weight: 550; }
+  .no-temp { text-align: center; color: var(--muted); font-size: 14px; margin: 18px 0 6px; }
 
-  /* The number of columns is set by fitColumns() in app.js. */
-  .modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
-  .modes button { padding: 14px; border-radius: 14px; border: 1px solid var(--line); display: flex;
-    align-items: center; justify-content: center; gap: 8px; font-weight: 550; white-space: nowrap; }
-  .modes button svg { flex: 0 0 auto; width: 20px; height: 20px; }  /* never squeezed away: then the labels overflow and the buttons stack */
-  .modes button[aria-pressed="true"][data-mode="cool"] { background: var(--cool); border-color: var(--cool); color: #fff; }
-  .modes button[aria-pressed="true"][data-mode="heat"] { background: var(--heat); border-color: var(--heat); color: #fff; }
-  .other-mode { text-align: center; color: var(--muted); font-size: 13px; margin-top: 8px; }
+  /* The five modes as one segmented row of icons; the current one filled in its colour (outlined while off). */
+  .modes { display: flex; gap: 4px; margin-top: 14px; padding: 4px; border-radius: 16px; background: var(--bg); border: 1px solid var(--line); }
+  .modes button { flex: 1 1 0; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); }
+  .modes button svg { width: 22px; height: 22px; }
+  .modes button[aria-checked="true"] { background: var(--card); color: var(--mode); box-shadow: inset 0 0 0 1.5px var(--mode); }
+  .modes.on button[aria-checked="true"] { background: var(--mode); color: #fff; box-shadow: none; }
 
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
   /* Airflow: --flow is the colour of the unit's mode (cooling or heating). */
   .airflow { padding-bottom: 6px; --flow-soft: color-mix(in srgb, var(--flow) 16%, var(--card)); --idle: color-mix(in srgb, var(--muted) 40%, var(--card)); }
   .af-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
   .af-head h2 { margin: 0; }
-  .af-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; min-height: 68px; border-top: 1px solid var(--line); padding: 6px 0; }
+  .af-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; min-height: 60px; border-top: 1px solid var(--line); padding: 6px 0; }
   .af-head + .af-row { border-top: 0; }
-  .af-row.minor-row { min-height: 52px; }
+  .af-row.minor-row { min-height: 48px; }
   .af-label { display: flex; flex-direction: column; gap: 2px; }
   .af-label b { font-size: 14px; font-weight: 500; }
   .af-label .minor { color: var(--muted); font-weight: 400; }
@@ -116,7 +115,7 @@
   .fan g:focus-visible line { stroke-width: 7; }
   .fan.disabled, .airflow button:disabled { opacity: .45; cursor: default; }
   .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-  .chips button { padding: 10px 6px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .chips button { padding: 8px 6px; white-space: nowrap; border-radius: 12px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   .chips button:active:not(:disabled) { background: var(--line); }
   .timer-active { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .timer-active b { font-size: 18px; }
@@ -149,6 +148,8 @@
   .round { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; }
   .round svg { width: 20px; height: 20px; }
   .ident { margin: 8px 0 0; font-size: 14px; }
+  /* Needed rarely: a quiet link under a unit's buttons rather than a third button. */
+  .row .link { flex-basis: 100%; text-align: left; color: var(--muted); font-size: 14px; text-decoration: underline; padding: 8px 0; }
   .manage-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
   .manage-head h1 { font-size: 22px; margin: 0; }
 </style>

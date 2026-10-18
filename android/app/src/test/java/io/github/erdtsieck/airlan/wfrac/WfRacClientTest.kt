@@ -111,6 +111,25 @@ class WfRacClientTest {
     }
 
     @Test
+    fun `records every request and its outcome for diagnostics`() = runBlocking {
+        val ok = client(unit().port)
+        ok.getDeviceInfo()
+        val refused = client(unit(result = 2).port)
+        runCatching { refused.getDeviceInfo() }
+        val gone = WfRacClient("127.0.0.1", "test", Scheme.HTTP, null, 1, 0, timeoutMs = 500)
+        runCatching { gone.getDeviceInfo() }
+
+        val first = ok.trace.entries().single()
+        assertEquals("getDeviceInfo", first.command)
+        assertEquals(0, first.result)
+        assertNull(first.error)
+        assertEquals(2, refused.trace.entries().single().result)
+        val failed = gone.trace.entries().single()
+        assertNull(failed.result)
+        assertNotNull(failed.error)
+    }
+
+    @Test
     fun `falls back to HTTPS and pins the unit's certificate`() = runBlocking {
         val u = unit(https = true)
         val c = client(u.port)

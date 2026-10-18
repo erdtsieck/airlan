@@ -11,7 +11,6 @@
     <string name="fault">storing %1$s</string>
     <string name="unreachable">Niet bereikbaar</string>
     <string name="needs_permission">Toestemming nodig</string>
-    <string name="set">ingesteld</string>
     <string name="off">uit</string>
     <string name="tile_off">Uit</string>
     <string name="tile_on">Aan, %1$s</string>
@@ -21,7 +20,10 @@
     <string name="turn_off">Uitzetten</string>
     <string name="rename">Naam wijzigen</string>
     <string name="rename_title">Naam van deze airco</string>
-    <string name="current_mode">Huidige stand: %1$s</string>
+    <string name="mode">Stand</string>
+    <string name="fan_no_temp">Alleen ventileren: geen temperatuur</string>
+    <string name="share_diagnostics">Diagnose delen</string>
+    <string name="diagnostics_subject">AirLAN diagnose</string>
     <string name="auto_off">Automatisch uit</string>
     <string name="airflow">Luchtstroom</string>
     <string name="fan_speed">Ventilator</string>

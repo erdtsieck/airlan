@@ -94,6 +94,31 @@ class CodecTest {
         assertEquals(listOf(true, true, true, true, false), listOf(0, 1, 2, 3, 64).map(Codec::modelHasVaneLR))
     }
 
+    /**
+     * A tester saw nothing change while his unit was in auto. The frame is not the cause: a
+     * write in auto carries every set-bit (mode, power, setpoint, fan, vane) like in any
+     * other mode, and every mode reads back as written.
+     */
+    @Test
+    fun `a write in any mode carries every set-bit and reads back as written`() {
+        val base = Codec.decode(live.getJSONObject("e81656c09e49").getString("airconStat"))
+        for (mode in Mode.entries) {
+            val written = base.copy(power = true, mode = mode, presetTemp = 23.5, airFlow = 3, windUD = 2, entrust = false)
+            val bytes = java.util.Base64.getDecoder().decode(Codec.encode(written)).map { it.toInt() and 0xff }
+            assertEquals("$mode power set-bit", 0x02, bytes[2] and 0x02)
+            assertEquals("$mode mode set-bit", 0x20, bytes[2] and 0x20)
+            assertEquals("$mode setpoint set-bit", 0x80, bytes[4] and 0x80)
+            assertEquals("$mode setpoint", 47, bytes[4] and 0x7f)
+            assertEquals("$mode fan set-bit", 0x08, bytes[3] and 0x08)
+            assertEquals("$mode vane set-bit", 0x80, bytes[3] and 0x80)
+            val read = Codec.decode(Codec.encode(written))
+            assertEquals(mode, read.mode)
+            assertEquals(23.5, read.presetTemp, 0.0)
+            assertEquals(3, read.airFlow)
+            assertTrue(read.power)
+        }
+    }
+
     @Test
     fun `refuses states it cannot encode`() {
         val base = Codec.decode(live.getJSONObject("e81656c09e49").getString("airconStat"))
