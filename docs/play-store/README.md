@@ -3,13 +3,18 @@
 Everything the Play Console asks for, prepared. The steps marked **you** need the
 developer's own account and identity; everything else is in this folder.
 
-| File | Use |
+The store texts and images live in `fastlane/metadata/android/<locale>/` at the root of
+the repository (`en-US` and `nl-NL`), the layout both Google Play and F-Droid read. They are
+the single source: edit them there, then copy them into the Play Console.
+
+| File (per locale) | Use |
 |---|---|
-| `listing-en.md`, `listing-nl.md` | Store listing texts (name, short and full description) |
-| `screenshots/en/`, `screenshots/nl/` | Phone screenshots, 1080×1920 (9:16) |
-| `feature-graphic.png` | Feature graphic, 1024×500 |
-| `icon-512.png` | App icon, 512×512 |
-| `../privacy.md` | Privacy policy, published at https://erdtsieck.github.io/airlan/privacy |
+| `title.txt`, `short_description.txt`, `full_description.txt` | Store listing texts (Play: name max 30, short description max 80, full description max 4000 characters) |
+| `changelogs/<versionCode>.txt` | Release notes for that version (max 500 characters) |
+| `images/phoneScreenshots/` | Phone screenshots, 1080×1920 (9:16) |
+| `en-US/images/featureGraphic.png` | Feature graphic, 1024×500 |
+| `en-US/images/icon.png` | App icon, 512×512 |
+| `docs/privacy.md` | Privacy policy, published at https://erdtsieck.github.io/airlan/privacy |
 
 ## 1. Developer account (**you**)
 
@@ -40,9 +45,11 @@ developer's own account and identity; everything else is in this folder.
 
 ## 4. Store listing
 
-Main store listing → copy from `listing-en.md`; add a translation for Dutch (nl-NL) from
-`listing-nl.md`. Upload `icon-512.png`, `feature-graphic.png` and the screenshots of the
-matching language. Category: *House & Home*. Contact email: required, shown publicly.
+Main store listing → copy the texts from `fastlane/metadata/android/en-US/`; add a translation
+for Dutch (nl-NL) from `nl-NL/`. Upload `en-US/images/icon.png`, `en-US/images/featureGraphic.png`
+and the screenshots of the matching language. Category: *House & Home*. Contact email:
+required, shown publicly. Website: https://github.com/erdtsieck/airlan. Privacy policy:
+https://erdtsieck.github.io/airlan/privacy.
 
 ## 5. Release
 
@@ -63,7 +70,9 @@ cd android
 3. After 14 days: Dashboard → *Apply for production* and answer the questions about the
    test, then create a production release with the same bundle (or a newer one).
 
-For every new version, raise `versionCode` (and `versionName`) in `android/app/build.gradle.kts`.
+For every new version, raise `versionCode` (and `versionName`) in `android/app/build.gradle.kts`,
+add `fastlane/metadata/android/{en-US,nl-NL}/changelogs/<versionCode>.txt`, and tag the release
+commit `v<versionName>` (for example `v0.3.0`): F-Droid picks up new versions from those tags.
 
 ## Upload key
 

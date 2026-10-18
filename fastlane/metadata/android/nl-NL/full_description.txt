@@ -1,15 +1,3 @@
-# Play Store listing (Dutch, nl-NL)
-
-## App name (max 30)
-
-AirLAN – airco bediening
-
-## Short description (max 80)
-
-Bedien je Mitsubishi WF-RAC-airco via je eigen wifi. Zonder cloud.
-
-## Full description (max 4000)
-
 AirLAN is een eenvoudige afstandsbediening voor airco's van Mitsubishi Heavy Industries met de WF-RAC-wifimodule (de module van de Smart M-Air-app). De app praat rechtstreeks met je airco's via je thuisnetwerk: geen account, geen cloud, niet wachten op een server.
 
 Wat je per airco kunt doen:

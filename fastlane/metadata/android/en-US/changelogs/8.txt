@@ -1,0 +1,1 @@
+First release on F-Droid. All five modes: auto, cool, heat, dry and fan only. Share a diagnostics report from Manage units (no names, addresses shortened). A more compact unit screen. Builds without the dependency metadata block.
