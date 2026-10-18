@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
@@ -27,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.erdtsieck.airlan.discovery.Discovery
+import io.github.erdtsieck.airlan.R
 import io.github.erdtsieck.airlan.timer.AlarmTimerScheduler
 import kotlinx.coroutines.delay
 
@@ -111,6 +113,9 @@ private fun App(vm: MainViewModel) {
         )
     }
 
+    // Read in composition rather than through the context, so they follow a change of language.
+    val diagnosticsSubject = stringResource(R.string.diagnostics_subject)
+    val shareDiagnostics = stringResource(R.string.share_diagnostics)
     when {
         state.screen == Screen.MANAGE || (state.loaded && state.units.isEmpty()) -> ManageScreen(
             state = state,
@@ -122,6 +127,13 @@ private fun App(vm: MainViewModel) {
             onRename = vm::rename,
             onMove = vm::move,
             onForget = vm::forget,
+            onShareDiagnostics = { id ->
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, diagnosticsSubject)
+                    .putExtra(Intent.EXTRA_TEXT, vm.diagnostics(id))
+                context.startActivity(Intent.createChooser(send, shareDiagnostics))
+            },
         )
         else -> UnitScreen(
             state = state,

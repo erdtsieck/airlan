@@ -14,7 +14,7 @@ AirLAN is een eenvoudige afstandsbediening voor airco's van Mitsubishi Heavy Ind
 
 Wat je per airco kunt doen:
 • Aan- en uitzetten
-• Kiezen tussen koelen en verwarmen
+• De stand kiezen: automatisch, koelen, verwarmen, drogen of ventileren
 • De temperatuur instellen in halve graden
 • Hem automatisch laten uitgaan na 15 of 30 minuten of 1 tot 6 uur
 • De ventilatorsnelheid en de richting van de lucht instellen, ook 3D auto op airco's die dat hebben

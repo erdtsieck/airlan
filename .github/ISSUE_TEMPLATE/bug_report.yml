@@ -65,3 +65,12 @@ body:
       description: Include the exact error message if there was one. Screenshots help.
     validations:
       required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics, if you can
+      description: >-
+        In AirLAN, Manage units, "Share diagnostics" under the unit (in the web app it copies
+        the report). It holds the firmware, the transport and the last requests with their result
+        codes; addresses keep only their last number and there are no names in it.
+      render: text

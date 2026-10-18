@@ -30,6 +30,8 @@ class WfRacClient(
     private val timeoutMs: Int = 6000,
     private val now: () -> Long = System::currentTimeMillis,
     private val operatorId: String = AIRLAN_OPERATOR_ID,
+    /** Where requests are recorded for a diagnostics report; shared across clients of one unit. */
+    val trace: RequestTrace = RequestTrace(),
 ) : AirconClient {
     private val mutex = Mutex()
     private var lastRequestAt = 0L
@@ -74,6 +76,9 @@ class WfRacClient(
     suspend fun request(command: String, contents: Map<String, Any>?, asOperator: String = operatorId): JSONObject = mutex.withLock {
         val wait = lastRequestAt + minIntervalMs - System.currentTimeMillis()
         if (wait > 0) delay(wait)
+        val started = System.currentTimeMillis()
+        var result: Int? = null
+        var error: String? = null
         try {
             val payload = buildMap {
                 put("apiVer", "1.0")
@@ -85,11 +90,16 @@ class WfRacClient(
                 if (contents != null) put("contents", contents)
             }
             val body = withContext(Dispatchers.IO) { sendDiscovering(command, JsonWriter.write(payload)) }
-            val result = body.optInt("result", -1)
-            if (result != 0) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused $command (result $result)", result)
+            val code = body.optInt("result", -1)
+            result = code
+            if (code != 0) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused $command (result $code)", code)
             body.optJSONObject("contents") ?: JSONObject()
+        } catch (e: Exception) {
+            if (result == null) error = e.javaClass.simpleName + (e.message?.let { ": " + it.take(80) } ?: "")
+            throw e
         } finally {
             lastRequestAt = System.currentTimeMillis()
+            trace.add(RequestTrace.Entry(started, command, lastRequestAt - started, result, error))
         }
     }
 
@@ -97,6 +107,12 @@ class WfRacClient(
 
     override suspend fun getStatus(airconId: String): UnitStatus {
         val contents = request("getAirconStat", mapOf("airconId" to airconId))
+        trace.module = RequestTrace.Module(
+            firmType = contents.optString("firmType").ifEmpty { null },
+            wireless = contents.optJSONObject("wireless")?.optString("firmVer")?.ifEmpty { null },
+            mcu = contents.optJSONObject("mcu")?.optString("firmVer")?.ifEmpty { null },
+            accounts = if (contents.has("numOfAccount")) contents.optInt("numOfAccount") else null,
+        )
         return UnitStatus(
             Codec.decode(contents.getString("airconStat")),
             lockedForS = lockedForS(airconId, contents),

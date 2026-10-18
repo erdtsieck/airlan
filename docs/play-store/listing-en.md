@@ -14,7 +14,7 @@ AirLAN is a simple remote for Mitsubishi Heavy Industries air conditioners with 
 
 What you can do, per air conditioner:
 • Switch it on or off
-• Choose cooling or heating
+• Choose auto, cooling, heating, drying or fan only
 • Set the temperature in half degrees
 • Have it switch off automatically after 15 or 30 minutes or 1 to 6 hours
 • Set the fan speed and the direction of the air, including 3D auto on units that have it

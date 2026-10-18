@@ -69,3 +69,19 @@ test('a unit proves it reports its left/right vane by anything but a pinned byte
 test('only ceiling cassettes lack a left/right vane', () => {
   assert.deepEqual([0, 1, 2, 3, 64].map(modelHasVaneLR), [true, true, true, true, false]);
 });
+
+// A tester saw nothing change while his unit was in auto. The frame is not the cause: a write
+// in auto carries every set-bit like in any other mode, and every mode reads back as written.
+test('a write in any mode carries every set-bit and reads back as written', () => {
+  const base = decode(live.e81656c09e49.airconStat);
+  for (const mode of [0, 1, 2, 3, 4]) {
+    const written = { ...base, power: true, mode, presetTemp: 23.5, airFlow: 3, windUD: 2, entrust: false };
+    const bytes = Buffer.from(encode(written), 'base64');
+    assert.equal(bytes[2] & 0x02, 0x02, `mode ${mode}: power set-bit`);
+    assert.equal(bytes[2] & 0x20, 0x20, `mode ${mode}: mode set-bit`);
+    assert.equal(bytes[4], 0x80 | 47, `mode ${mode}: setpoint with its set-bit`);
+    assert.equal(bytes[3] & 0x88, 0x88, `mode ${mode}: fan and vane set-bits`);
+    const read = decode(encode(written));
+    assert.deepEqual([read.mode, read.presetTemp, read.airFlow, read.power], [mode, 23.5, 3, true]);
+  }
+});

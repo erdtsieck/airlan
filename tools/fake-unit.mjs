@@ -107,6 +107,8 @@ export function startFakeUnit({
         updatedBy: 'local',
         expires: unit.lock.expires,
         firmType: 'WF-RAC',
+        wireless: { firmVer: '010' },
+        mcu: { firmVer: '131' },
         numOfAccount: unit.accounts.size,
       });
 

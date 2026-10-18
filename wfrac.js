@@ -220,6 +220,27 @@ function post(scheme, host, port, command, payload) {
   });
 }
 
+/** The last requests to one unit, kept in memory for a diagnostics report. Nothing personal goes in. */
+export class RequestTrace {
+  #entries = [];
+  /** What getAirconStat tells about the module: firmType, wireless and MCU version, account count. */
+  module = null;
+
+  constructor(capacity = 30) {
+    this.capacity = capacity;
+  }
+
+  /** `result` is the unit's result code; null with `error` when no answer came back. */
+  add(entry) {
+    if (this.#entries.length === this.capacity) this.#entries.shift();
+    this.#entries.push(entry);
+  }
+
+  entries() {
+    return [...this.#entries];
+  }
+}
+
 /**
  * Talks to one module. The module handles one connection at a time and wants at least
  * a second between requests, so all requests go through a queue.
@@ -234,8 +255,13 @@ export class WfRacClient {
   #registered = new Set();
   #ownLockUntil = new Map(); // airconId -> the `expires` our own last write set
 
-  constructor({ host, port = PORT, scheme = null, deviceId, operatorId = AIRLAN_OPERATOR_ID, minIntervalMs = 1100 }) {
+  /**
+   * `trace` records the last requests (and what getAirconStat says about the module) for a
+   * diagnostics report; pass the same one to every client of a unit to keep it across them.
+   */
+  constructor({ host, port = PORT, scheme = null, deviceId, operatorId = AIRLAN_OPERATOR_ID, minIntervalMs = 1100, trace = new RequestTrace() }) {
     this.host = host;
+    this.trace = trace;
     this.port = port;
     this.scheme = scheme;
     this.deviceId = deviceId;
@@ -269,6 +295,9 @@ export class WfRacClient {
     const run = async () => {
       const wait = this.#lastRequestAt + this.minIntervalMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      const started = Date.now();
+      let result = null;
+      let error = null;
       try {
         const body = await this.#send(command, {
           apiVer: '1.0',
@@ -278,10 +307,15 @@ export class WfRacClient {
           timestamp: Math.round(Date.now() / 1000),
           ...(contents ? { contents } : {}),
         });
+        result = body.result;
         if (body.result !== 0) throw new WfRacError('unit_refused', `unit refused ${command} (result ${body.result})`, body.result);
         return body.contents;
+      } catch (e) {
+        if (result === null) error = `${e.code ?? e.name}: ${String(e.message).slice(0, 80)}`;
+        throw e;
       } finally {
         this.#lastRequestAt = Date.now();
+        this.trace.add({ at: started, command, ms: this.#lastRequestAt - started, result, error });
       }
     };
     const p = this.#queue.then(run, run);
@@ -300,6 +334,12 @@ export class WfRacClient {
    */
   async getStat(airconId) {
     const contents = await this.request('getAirconStat', { airconId });
+    this.trace.module = {
+      firmType: contents.firmType ?? null,
+      wireless: contents.wireless?.firmVer ?? null,
+      mcu: contents.mcu?.firmVer ?? null,
+      accounts: contents.numOfAccount ?? null,
+    };
     return { contents, state: decode(contents.airconStat), lockedForS: this.#lockedForS(airconId, contents), accounts: contents.numOfAccount ?? null };
   }
 

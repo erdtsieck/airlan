@@ -12,7 +12,6 @@
     <string name="fault">fault %1$s</string>
     <string name="unreachable">Unreachable</string>
     <string name="needs_permission">Needs permission</string>
-    <string name="set">set</string>
     <string name="off">off</string>
     <string name="tile_off">Off</string>
     <string name="tile_on">On, %1$s</string>
@@ -22,7 +21,10 @@
     <string name="turn_off">Turn off</string>
     <string name="rename">Rename</string>
     <string name="rename_title">Name of this unit</string>
-    <string name="current_mode">Current mode: %1$s</string>
+    <string name="mode">Mode</string>
+    <string name="fan_no_temp">Fan only: no temperature to set</string>
+    <string name="share_diagnostics">Share diagnostics</string>
+    <string name="diagnostics_subject">AirLAN diagnostics</string>
     <string name="auto_off">Auto off</string>
     <string name="airflow">Airflow</string>
     <string name="fan_speed">Fan speed</string>

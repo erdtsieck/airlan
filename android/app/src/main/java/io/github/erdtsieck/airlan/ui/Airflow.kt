@@ -89,17 +89,13 @@ private class Fan(
 private val UP_DOWN = Fan(112f, 64f, 16f, 12f, 90f, 50f, listOf(6f, 24f, 42f, 60f), sideView = true)
 private val LEFT_RIGHT = Fan(120f, 60f, 60f, 56f, 54f, 50f, listOf(-66f, -33f, 0f, 33f, 66f), sideView = false)
 
-/** The colours of the card: the accent is the unit's mode (cooling or heating). */
+/** The colours of the card: the accent is the colour of the unit's mode. */
 private class FlowColors(val accent: Color, val soft: Color, val idle: Color, val muted: Color, val line: Color)
 
 @Composable
 private fun flowColors(mode: Mode?): FlowColors {
     val c = LocalAirColors.current
-    val accent = when (mode) {
-        Mode.COOL -> c.cool
-        Mode.HEAT -> c.heat
-        else -> c.text
-    }
+    val accent = c.of(mode)
     return FlowColors(accent, accent.copy(alpha = 0.16f).compositeOver(c.card), c.muted.copy(alpha = 0.4f).compositeOver(c.card), c.muted, c.line)
 }
 
@@ -194,7 +190,7 @@ private fun LabelledRow(title: String, value: String?, f: FlowColors, minor: Boo
             }
             Row(verticalAlignment = Alignment.CenterVertically) { control() }
         },
-        modifier = Modifier.fillMaxWidth().heightIn(min = if (minor) 52.dp else 68.dp).padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (minor) 48.dp else 60.dp).padding(vertical = 6.dp),
     ) { measurables, constraints ->
         val free = constraints.copy(minWidth = 0, minHeight = 0)
         // At its natural width: a Row squeezed into less would shrink its last items to nothing.

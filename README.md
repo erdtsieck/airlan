@@ -10,7 +10,7 @@ directly over your home network. It comes in two forms:
 Per unit you can:
 
 - switch it on or off
-- choose cooling or heating
+- choose the mode: auto, cooling, heating, drying or fan only
 - set the temperature (16–30 °C in 0.5° steps)
 - have it switch off automatically after 15 or 30 minutes or 1–6 hours
 - set the fan speed (auto, quiet, low, medium, high) and the direction, at the bottom of the
@@ -50,7 +50,10 @@ What is confirmed to work, and what is not:
 
 Found a problem, or does it work with your unit? Please
 [open an issue](https://github.com/erdtsieck/airlan/issues/new/choose); the form asks for
-the unit model and the versions that help most.
+the unit model and the versions that help most. *Share diagnostics* under a unit on the
+*Manage units* screen gives a report to paste in: the module's firmware and transport and the
+last requests with their result codes, without names, and with addresses cut to their last
+number.
 
 ## Android app
 
@@ -61,7 +64,7 @@ then notifies you. The
 phone has to be on the home network when the timer fires.
 
 No air conditioner at hand? *Try a demo unit* (on the *Manage units* screen) adds a
-simulated unit, marked *Demo*, that works like a real one: power, cooling or heating,
+simulated unit, marked *Demo*, that works like a real one: power, the modes,
 temperature, and the switch-off timer as a real alarm. It reports an indoor temperature
 that moves towards the set temperature while it runs. Its state is kept in memory only and
 starts afresh (off, cooling, 21 °C) whenever the app's process starts; the unit itself stays
@@ -169,6 +172,7 @@ with your result (the firmware branch and versions are in the `getAirconStat` re
 | `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `fanSpeed` (`"auto"` or 1–4: quiet, low, medium, high), `vane` (up/down direction: `"swing"` or 1–4, highest to lowest), `vaneLR` (left/right direction: `"swing"`, 1–5 from left to right, 6 wide, 7 narrow), `"3d"` as `vane` and/or `vaneLR` for 3D auto, `name`. `vaneLR` is `null`, and `vaneLR` and `"3d"` are refused, for a unit that does not report its left/right vane (see below) |
 | `PUT /api/units/order` | Body `{ "order": ["<airconId>", …] }`: the order of the units; units left out keep theirs after the named ones |
 | `DELETE /api/units/:id` | Forget the unit |
+| `GET /api/units/:id/diagnostics` | A plain-text report for a bug report: firmware, transport and the last requests with their result codes. Addresses keep only their last number, the MAC its last four digits; no names |
 | `PUT /api/units/:id/timer` | Body `{ "minutes": 1–360 }`: switch off after that time |
 | `DELETE /api/units/:id/timer` | Cancel the timer |
 | `POST /api/scan` | Scan the network for units again |

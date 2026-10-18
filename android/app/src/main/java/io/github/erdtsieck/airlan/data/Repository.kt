@@ -7,6 +7,7 @@ import io.github.erdtsieck.airlan.discovery.hostsToScan
 import io.github.erdtsieck.airlan.wfrac.AirconClient
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.DemoClient
+import io.github.erdtsieck.airlan.wfrac.RequestTrace
 import io.github.erdtsieck.airlan.wfrac.WFRAC_PORT
 import io.github.erdtsieck.airlan.wfrac.WfRacClient
 import io.github.erdtsieck.airlan.wfrac.WfRacException
@@ -73,6 +74,9 @@ class Repository(
     private class Connection(val host: String, val client: AirconClient)
 
     private val clients = ConcurrentHashMap<String, Connection>()
+
+    /** Per unit, kept across clients (a unit that moved gets a new one) for [diagnostics]. */
+    private val traces = ConcurrentHashMap<String, RequestTrace>()
     private val registered = ConcurrentHashMap.newKeySet<String>()
     private val scanMutex = Mutex()
     private val migrateMutex = Mutex()
@@ -88,7 +92,8 @@ class Repository(
     private fun newClient(unit: StoredUnit): AirconClient {
         if (unit.demo) return DemoClient(now)
         val ids = store.state.value
-        return WfRacClient(unit.host, ids.deviceId, unit.scheme, unit.certificatePin, port, clientIntervalMs, now = now)
+        val trace = traces.getOrPut(unit.airconId) { RequestTrace() }
+        return WfRacClient(unit.host, ids.deviceId, unit.scheme, unit.certificatePin, port, clientIntervalMs, now = now, trace = trace)
     }
 
     private fun require(airconId: String) = store.unit(airconId) ?: throw IllegalArgumentException("unknown unit $airconId")
@@ -130,6 +135,10 @@ class Repository(
             store.updateUnit(airconId) { it.copy(scheme = scheme, certificatePin = client.certificatePin) }
         }
     }
+
+    /** A report about [airconId] to share with the developer; see [Diagnostics]. */
+    fun diagnostics(airconId: String, appVersion: String, androidVersion: String, state: AirconState?): String =
+        Diagnostics.report(appVersion, androidVersion, require(airconId), state, traces[airconId], now())
 
     suspend fun state(airconId: String): AirconState =
         withUnit(airconId) { it.getStat(airconId) }.also { noteAirflowSupport(airconId, it) }
