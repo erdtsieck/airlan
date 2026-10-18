@@ -1,15 +1,3 @@
-# Play Store listing (English, en-US)
-
-## App name (max 30)
-
-AirLAN – AC remote
-
-## Short description (max 80)
-
-Control your Mitsubishi WF-RAC air conditioner on your home Wi-Fi. No cloud.
-
-## Full description (max 4000)
-
 AirLAN is a simple remote for Mitsubishi Heavy Industries air conditioners with the WF-RAC Wi-Fi module (the module used by the Smart M-Air app). It talks to your air conditioners directly over your home network: no account, no cloud, no waiting for a server.
 
 What you can do, per air conditioner:
@@ -35,12 +23,3 @@ Good to know:
 Free and open source (MIT): https://github.com/erdtsieck/airlan
 
 AirLAN is an independent project. It is not affiliated with, endorsed by or supported by Mitsubishi Heavy Industries.
-
-## Category
-
-House & Home
-
-## Contact
-
-Website: https://github.com/erdtsieck/airlan
-Privacy policy: https://erdtsieck.github.io/airlan/privacy

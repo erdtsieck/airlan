@@ -1,0 +1,1 @@
+All five modes: auto, cool, heat, dry and fan only, with the mode the unit is in shown correctly. Share a diagnostics report from Manage units (no names, addresses shortened). A more compact unit screen.

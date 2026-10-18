@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.erdtsieck.airlan"
         minSdk = 26
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.3.0"
+        versionCode = 8
+        versionName = "0.3.1"
     }
 
     signingConfigs {
@@ -40,11 +40,19 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("upload")        }
+            signingConfig = signingConfigs.findByName("upload")
+        }
     }
 
     buildFeatures {
         compose = true
+    }
+
+    // The dependency metadata block is encrypted with a Google key. F-Droid cannot verify it
+    // and requires it to be left out; Play does not need it either.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     testOptions {

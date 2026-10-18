@@ -1,4 +1,5 @@
-"""Recreates the Play Store screenshots (docs/play-store/screenshots) on an emulator.
+"""Recreates the store screenshots (fastlane/metadata/android/<locale>/images/phoneScreenshots,
+used by Google Play and F-Droid) on an emulator.
 
 Start three stand-in units (tools/fake-unit.mjs) on three addresses of this machine that the
 emulator can reach (10.0.2.2 is the host's loopback; any other address of the host works),
@@ -27,7 +28,8 @@ options = parser.parse_args()
 ADB = options.adb
 SERIAL = options.serial
 HOSTS = options.hosts.split(",")
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "play-store", "screenshots")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fastlane", "metadata", "android")
+STORE_LOCALES = {"en": "en-US", "nl": "nl-NL"}
 TMP = tempfile.mkdtemp(prefix="airlan-shots-")
 PKG = "io.github.erdtsieck.airlan"
 
@@ -89,7 +91,7 @@ def shot(name, lang, bottom=False):
     img = Image.open(raw)
     assert img.size == (1080, 2400), img.size
     box = (0, 2400 - 1920, 1080, 2400) if bottom else (0, 0, 1080, 1920)
-    img.crop(box).save(os.path.join(OUT, lang, f"{name}.png"), optimize=True)
+    img.crop(box).save(os.path.join(OUT, STORE_LOCALES[lang], "images", "phoneScreenshots", f"{name}.png"), optimize=True)
 
 
 def scroll(down):
