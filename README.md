@@ -42,8 +42,9 @@ app for everyone after a closed test with enough testers for that long.
 What is confirmed to work, and what is not:
 
 - **Confirmed:** Mitsubishi Heavy Industries indoor units with the WF-RAC module on the
-  HTTP firmware (wireless 010, MCU 131), on the developer's own three units.
-- **Untested:** the HTTPS firmware branches (`WF-RAC-HTTPS`, `WCBN4612L`), see
+  HTTP firmware (wireless 010, MCU 131), on the developer's own three units, and on the
+  `WF-RAC-HTTPS` firmware (wireless 025, MCU 200), reported by a tester with two units.
+- **Untested:** the `WCBN4612L` firmware branch, see
   [Supported firmware](#supported-firmware). Reports are very welcome.
 - **Not supported:** Mitsubishi **Electric** units (MELCloud, MAC-xxx Wi-Fi interfaces).
   They use a different system.
@@ -137,12 +138,13 @@ The WF-RAC module comes in three firmware branches:
 | Branch | Transport | Status |
 |---|---|---|
 | `WF-RAC` (e.g. wireless 010, MCU 131) | HTTP | Tested on real units |
-| `WF-RAC-HTTPS` | HTTPS, legacy mbedTLS | Implemented, **not yet tested on real units** |
+| `WF-RAC-HTTPS` (e.g. wireless 025, MCU 200) | HTTPS, legacy mbedTLS | Works, reported by a tester (reads and writes). Each request takes about 1.6 s |
 | `WCBN4612L` | HTTPS, legacy mbedTLS | Implemented, **not yet tested on real units** |
 
-AirLAN detects the transport per unit. If you have an HTTPS unit, please open an issue
-with your result (the firmware branch and versions are in the `getAirconStat` reply;
-`data/server.log` shows which transport was detected).
+AirLAN detects the transport per unit. If you have a `WCBN4612L` unit, please open an issue
+with your result. *Share diagnostics* on the app's *Manage units* screen gives the firmware
+branch, versions and transport in one report (the server has
+`GET /api/units/:id/diagnostics`).
 
 ## How it works
 
