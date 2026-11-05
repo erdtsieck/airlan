@@ -53,7 +53,12 @@ class WfRacClientTest {
                 val n = it.getInputStream().read(buf)
                 if (n <= 0) return
                 arrivals += System.currentTimeMillis()
-                val raw = String(buf, 0, n)
+                val raw = String(buf, 0, n, Charsets.ISO_8859_1)
+                if (!raw.startsWith("POST ")) {
+                    // Not HTTP (a TLS handshake, say): the module's web server says so in plain text.
+                    it.getOutputStream().write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                    return
+                }
                 firstReads += raw
                 val payload = JSONObject(raw.substringAfter("\r\n\r\n"))
                 val body = JSONObject(payload.toString()).put("result", result)
@@ -94,8 +99,43 @@ class WfRacClientTest {
     @After
     fun closeUnits() = units.forEach { it.close() }
 
-    private fun client(port: Int, scheme: Scheme? = null, pin: String? = null, minIntervalMs: Long = 0) =
-        WfRacClient("127.0.0.1", "test", scheme, pin, port, minIntervalMs, timeoutMs = 2000)
+    private fun client(port: Int, scheme: Scheme? = null, pin: String? = null, minIntervalMs: Long = 0, readTimeoutMs: Int = 2000) =
+        WfRacClient("127.0.0.1", "test", scheme, pin, port, minIntervalMs, connectTimeoutMs = 2000, readTimeoutMs = readTimeoutMs)
+
+    /**
+     * Accepts connections and records what each one sent first, then answers with [reply]
+     * (raw bytes) or, when it is null, says nothing and keeps the connection open: a module
+     * that is busy, slow, or stuck.
+     */
+    private inner class RawUnit(val reply: ByteArray?) {
+        val firstBytes: MutableList<ByteArray> = Collections.synchronizedList(mutableListOf())
+        private val server = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
+        val port get() = server.localPort
+
+        init {
+            thread(isDaemon = true) {
+                while (!server.isClosed) {
+                    val s = try { server.accept() } catch (e: IOException) { break }
+                    thread(isDaemon = true) {
+                        s.use {
+                            val buf = ByteArray(8192)
+                            val n = try { it.getInputStream().read(buf) } catch (e: IOException) { -1 }
+                            if (n > 0) firstBytes += buf.copyOf(n)
+                            if (reply == null) Thread.sleep(5000) else it.getOutputStream().write(reply)
+                        }
+                    }
+                }
+            }
+        }
+
+        fun close() = server.close()
+    }
+
+    private val raws = mutableListOf<RawUnit>()
+    private fun raw(reply: ByteArray?) = RawUnit(reply).also { raws += it }
+
+    @After
+    fun closeRaws() = raws.forEach { it.close() }
 
     @Test
     fun `talks plain HTTP and sends the whole request in one write`() = runBlocking {
@@ -116,7 +156,7 @@ class WfRacClientTest {
         ok.getDeviceInfo()
         val refused = client(unit(result = 2).port)
         runCatching { refused.getDeviceInfo() }
-        val gone = WfRacClient("127.0.0.1", "test", Scheme.HTTP, null, 1, 0, timeoutMs = 500)
+        val gone = WfRacClient("127.0.0.1", "test", Scheme.HTTP, null, 1, 0, connectTimeoutMs = 500)
         runCatching { gone.getDeviceInfo() }
 
         val first = ok.trace.entries().single()
@@ -147,7 +187,8 @@ class WfRacClientTest {
             c.getDeviceInfo()
             fail("expected the changed certificate to be refused")
         } catch (e: IOException) {
-            assertNull(c.scheme)
+            // Still an HTTPS unit; it is the certificate that is wrong, not the protocol.
+            assertEquals(Scheme.HTTPS, c.scheme)
         }
     }
 
@@ -166,15 +207,71 @@ class WfRacClientTest {
     }
 
     @Test
-    fun `an unreachable unit is an IOException and forgets the scheme`() = runBlocking {
+    fun `an unreachable unit keeps its scheme and is not tried over the other protocol`() = runBlocking {
         val port = ServerSocket(0).use { it.localPort }
-        val c = client(port, Scheme.HTTPS)
+        for (known in listOf(Scheme.HTTP, null)) {
+            val c = client(port, known)
+            try {
+                c.getDeviceInfo()
+                fail("expected a connection failure")
+            } catch (e: UnitUnreachableException) {
+                assertEquals(known, c.scheme)
+                assertTrue(c.trace.entries().single().error!!.startsWith("unreachable"))
+            }
+        }
+    }
+
+    // Regression: a unit that answered slowly once lost its scheme, after which every request
+    // went out twice, the second time as a TLS handshake to a plain-HTTP module, which kept it
+    // occupied. Only restarting the app (reloading the stored scheme) ended that.
+    @Test
+    fun `a unit that does not answer in time keeps its scheme and gets no TLS handshake`() = runBlocking {
+        val u = raw(reply = null)
+        for (known in listOf(Scheme.HTTP, null)) {
+            val c = client(u.port, known, readTimeoutMs = 300)
+            repeat(2) {
+                try {
+                    c.getDeviceInfo()
+                    fail("expected no answer")
+                } catch (e: NoAnswerException) {
+                    assertEquals(known, c.scheme)
+                }
+            }
+        }
+        Thread.sleep(100)
+        assertEquals(4, u.firstBytes.size)
+        assertTrue("every attempt is plain HTTP", u.firstBytes.all { String(it, Charsets.ISO_8859_1).startsWith("POST ") })
+    }
+
+    @Test
+    fun `a unit that answers a plain request in TLS is detected again as HTTPS`() = runBlocking {
+        // A TLS alert record (fatal, unexpected_message): what a TLS server sends to plain text.
+        val alert = byteArrayOf(0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x0a)
+        val u = raw(alert)
+        val c = client(u.port, Scheme.HTTP)
         try {
             c.getDeviceInfo()
-            fail("expected a connection failure")
+            fail("the fake answers nothing but the alert")
         } catch (e: IOException) {
-            assertNull(c.scheme)
+            // Detection tried HTTPS as well; this fake cannot finish a handshake.
         }
+        assertTrue(c.trace.notes().single().text.contains("another protocol"))
+    }
+
+    @Test
+    fun `a unit known as HTTPS that answers in plain HTTP switches to HTTP`() = runBlocking {
+        val u = unit()
+        val c = client(u.port, Scheme.HTTPS)
+        assertEquals("e81656cb0d45", c.getDeviceInfo())
+        assertEquals(Scheme.HTTP, c.scheme)
+    }
+
+    @Test
+    fun `the time a request waited for its turn is recorded`() = runBlocking {
+        val u = unit()
+        val c = client(u.port, Scheme.HTTP, minIntervalMs = 300)
+        (1..2).map { async { c.getDeviceInfo() } }.awaitAll()
+        assertTrue(c.trace.entries().maxOf { it.waitedMs } >= 250)
     }
 
     @Test

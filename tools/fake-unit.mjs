@@ -5,6 +5,7 @@
 //                            [--indoor 23.5] [--outdoor 14.5]
 //                            [--accounts-taken 0..4] [--other-writer-every <seconds>] [--mdns]
 //                            [--model 0|1|2|3|64] [--legacy]
+//                            [--answer-delay <ms>] [--stall-every <s> --stall-for <s>]
 //
 // Answers getDeviceInfo, getAirconStat, setAirconStat, updateAccountInfo and
 // deleteAccountInfo over plain HTTP like the HTTP firmware does, keeps the state across
@@ -21,6 +22,11 @@
 //  - --model sets the model group byte (64: a ceiling cassette, no left/right vane);
 //    --legacy reports byte 12 pinned to 1, as a unit with the legacy bus signature does:
 //    it takes left/right vane and 3D auto commands but never reports them back.
+//  - --answer-delay answers every request that much later, like a unit with a weak Wi-Fi
+//    signal; --stall-every/--stall-for make it accept connections and not answer for a while
+//    (busy or stuck), as the real module does around its hourly Wi-Fi reassociation. Anything
+//    that is not HTTP, such as a TLS handshake, is logged: a plain-HTTP module should never
+//    see one once its scheme is known.
 // Point AirLAN at it by IP address (from the Android emulator: 10.0.2.2).
 //
 // The tests use startFakeUnit() directly.
@@ -52,6 +58,7 @@ export function startFakeUnit({
   accountsTaken = 0,
   legacy = false,
   model,
+  answerDelayMs = 0,
   state: initial = {},
   log = () => {},
 } = {}) {
@@ -63,6 +70,15 @@ export function startFakeUnit({
     lock: { writer: null, expires: 0 },
     clock: Math.round(Date.now() / 1000),
     requests: [],
+    /** Connections accepted, and those that were not HTTP (a TLS handshake, say). */
+    connections: 0,
+    notHttp: 0,
+    stalledUntil: 0,
+    /** Accepts connections but answers none for [seconds]. */
+    stall(seconds) {
+      unit.stalledUntil = Date.now() + seconds * 1000;
+      log(`stalling for ${seconds} s: connections are accepted, nothing is answered`);
+    },
     otherWrite() {
       unit.lock = { writer: 'other-app', expires: unit.clock + WRITE_LOCK_S };
       log('another app wrote: locked for 60 s');
@@ -86,7 +102,9 @@ export function startFakeUnit({
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
-    req.on('end', () => {
+    req.on('end', async () => {
+      if (Date.now() < unit.stalledUntil) return; // Never answers; the client gives up.
+      if (answerDelayMs) await new Promise((r) => setTimeout(r, answerDelayMs));
       let payload;
       try {
         payload = JSON.parse(raw);
@@ -153,6 +171,12 @@ export function startFakeUnit({
       }
     });
   });
+  server.on('connection', () => unit.connections++);
+  server.on('clientError', (e, socket) => {
+    unit.notHttp++;
+    log(`a connection that is not HTTP (${e.code}): a TLS handshake to a plain-HTTP module?`);
+    socket.destroy();
+  });
 
   return new Promise((resolve) => server.listen(port, host, () => resolve({ server, port: server.address().port, unit })));
 }
@@ -206,10 +230,13 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     accountsTaken: Number(arg('accounts-taken', 0)),
     legacy: flag('legacy'),
     model: arg('model') === undefined ? undefined : Number(arg('model')),
+    answerDelayMs: Number(arg('answer-delay', 0)),
     state: initial,
     log,
   });
   log(`fake unit ${airconId} on port ${port}: ${describe(unit.state)}, ${unit.accounts.size}/${ACCOUNT_SLOTS} accounts taken`);
+  const stallEvery = Number(arg('stall-every', 0));
+  if (stallEvery > 0) setInterval(() => unit.stall(Number(arg('stall-for', 30))), stallEvery * 1000);
   const every = Number(arg('other-writer-every', 0));
   if (every > 0) setInterval(() => { unit.clock = Math.round(Date.now() / 1000); unit.otherWrite(); }, every * 1000);
   if (flag('mdns')) {

@@ -16,6 +16,9 @@ const day = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d
  * `unit` as stored, `state` the last decoded state (or null), `trace` the unit's RequestTrace
  * (or null).
  */
+/** A request that waited at least this long for its turn says so. */
+const QUEUE_NOTE_MS = 1500;
+
 export function report({ version, platform, unit, state, trace, now = Date.now() }) {
   const m = trace?.module;
   const lines = [
@@ -33,12 +36,18 @@ export function report({ version, platform, unit, state, trace, now = Date.now()
   const entries = trace?.entries() ?? [];
   lines.push('', `Last ${entries.length} requests:`);
   for (const e of entries) {
-    lines.push(`${clock(e.at)} ${e.command} ${e.ms} ms ${e.result !== null ? `result ${e.result}` : maskAddresses(e.error ?? 'no answer')}`);
+    const queued = (e.waitedMs ?? 0) >= QUEUE_NOTE_MS ? `, queued ${e.waitedMs} ms` : '';
+    lines.push(`${clock(e.at)} ${e.command} ${e.ms} ms${queued} ${e.result !== null ? `result ${e.result}` : maskAddresses(e.error ?? 'no answer')}`);
   }
   const answered = entries.filter((e) => e.result !== null);
   if (answered.length) {
     const average = Math.round(answered.reduce((sum, e) => sum + e.ms, 0) / answered.length);
     lines.push(`Average answer time: ${average} ms, failures: ${entries.filter((e) => e.result !== 0).length} of ${entries.length}`);
+  }
+  const notes = trace?.notes?.() ?? [];
+  if (notes.length) {
+    lines.push('', 'Events:');
+    for (const n of notes) lines.push(`${clock(n.at)} ${maskAddresses(n.text)}`);
   }
   return lines.join('\n') + '\n';
 }

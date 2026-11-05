@@ -25,3 +25,17 @@ test('reports firmware, state and requests without the name, address or MAC', ()
   assert.match(text, /failures: 2 of 3/);
   assert.doesNotMatch(text, /Woonkamer|192\.168|e81656cb/);
 });
+
+test('a request that queued long and events such as a move are reported, addresses masked', () => {
+  const trace = new RequestTrace();
+  trace.add({ at: 0, command: 'getAirconStat', ms: 10000, result: null, error: 'connected, no answer within 10 s', waitedMs: 4200 });
+  trace.add({ at: 1000, command: 'getAirconStat', ms: 90, result: 0, error: null, waitedMs: 200 });
+  trace.note('address changed from 192.168.68.116 to 192.168.68.120', 2000);
+  const unit = { airconId: 'e81656cb0d45', name: 'Woonkamer', host: '192.168.68.109', scheme: 'http' };
+
+  const text = report({ version: '0.3.2', platform: 'Node test', unit, state: null, trace, now: 0 });
+
+  assert.match(text, /getAirconStat 10000 ms, queued 4200 ms connected, no answer within 10 s/);
+  assert.match(text, /getAirconStat 90 ms result 0/);
+  assert.match(text, /Events:\n.*address changed from x\.x\.x\.116 to x\.x\.x\.120/);
+});

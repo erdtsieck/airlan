@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WfRacClient, WfRacError, RequestTrace, MODE_NAMES, PORT as WFRAC_PORT, modelHasVaneLR } from './wfrac.js';
+import { WfRacClient, WfRacError, RequestTrace, failureKind, MODE_NAMES, PORT as WFRAC_PORT, modelHasVaneLR } from './wfrac.js';
 import { report as diagnosticsReport } from './diagnostics.js';
 import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
 import { browse } from './mdns.js';
@@ -83,10 +83,12 @@ async function adopt(host) {
     log(`new unit ${airconId} at ${host} (${probe.scheme})`);
   } else if (unit.host !== host) {
     log(`unit ${airconId} moved ${unit.host} -> ${host}`);
+    traceOf(airconId).note(`address changed from ${unit.host} to ${host}`);
     unit.host = host;
   }
+  // The unit's client (its one request queue) stays unless it must reach the unit differently.
+  if (clients.get(airconId)?.host !== host || unit.scheme !== probe.scheme) clients.delete(airconId);
   unit.scheme = probe.scheme;
-  clients.delete(airconId);
   return unit;
 }
 
@@ -96,12 +98,22 @@ const announced = () => browse(lanAddresses(os.networkInterfaces()));
 /**
  * Looks for WF-RAC modules: by mDNS, and by probing every address on the local network for
  * the module's port, as not every module answers mDNS reliably.
+ *
+ * The addresses of known units are left out of the probe and are not adopted again: a module
+ * takes one connection at a time and wants a second between requests, and a probe or a second
+ * client would cut across the requests its own client is making. A known unit that moved shows
+ * up at an address that is not known, or by mDNS under its own name.
  */
 function scan() {
   if (scanning) return scanning;
   scanning = (async () => {
-    const [byMdns, open] = await Promise.all([announced(), findOpen(hostsToScan(os.networkInterfaces()))]);
-    for (const host of new Set([...byMdns.map((m) => m.address), ...open])) {
+    const knownAt = new Map(store.units.map((u) => [u.host, u.airconId]));
+    const [byMdns, open] = await Promise.all([
+      announced(),
+      findOpen(hostsToScan(os.networkInterfaces()).filter((h) => !knownAt.has(h))),
+    ]);
+    const fresh = byMdns.filter((m) => knownAt.get(m.address) !== m.airconId).map((m) => m.address);
+    for (const host of new Set([...fresh, ...open])) {
       try {
         await adopt(host);
       } catch (e) {
@@ -121,11 +133,15 @@ const clients = new Map();
 const cache = new Map(); // airconId -> { at, contents, state }
 const traces = new Map(); // airconId -> RequestTrace, kept across clients for the diagnostics report
 
+function traceOf(airconId) {
+  if (!traces.has(airconId)) traces.set(airconId, new RequestTrace());
+  return traces.get(airconId);
+}
+
 function clientFor(unit) {
   let c = clients.get(unit.airconId);
   if (!c || c.host !== unit.host) {
-    if (!traces.has(unit.airconId)) traces.set(unit.airconId, new RequestTrace());
-    c = new WfRacClient({ host: unit.host, scheme: unit.scheme, ...ids(), trace: traces.get(unit.airconId) });
+    c = new WfRacClient({ host: unit.host, scheme: unit.scheme, ...ids(), trace: traceOf(unit.airconId) });
     clients.set(unit.airconId, c);
   }
   return c;
@@ -143,18 +159,23 @@ async function relocate(unit) {
     await adopt(found.address).catch(() => {});
     await saveStore();
   } else if (!found && Date.now() - lastScan >= 60_000) {
+    traceOf(unit.airconId).note('not found by mDNS: searching the network');
     await scan();
   }
   return unit.host !== before;
 }
 
-/** Runs an action on a unit; on a network failure, looks for the unit and retries if it moved. */
+/**
+ * Runs an action on a unit. When nothing answers at its address at all, looks for the unit
+ * (DHCP may have moved it) and retries if it moved. A unit that accepts the connection but
+ * answers slowly or not at all is still there: searching would only add traffic.
+ */
 async function withUnit(unit, fn) {
   const client = clientFor(unit);
   try {
     return await fn(client);
   } catch (e) {
-    if (e instanceof WfRacError) throw e;
+    if (failureKind(e) !== 'unreachable') throw e;
     log(`unit ${unit.airconId} unreachable at ${unit.host}, looking for it`);
     if (!(await relocate(unit))) throw e;
     return fn(clientFor(unit));

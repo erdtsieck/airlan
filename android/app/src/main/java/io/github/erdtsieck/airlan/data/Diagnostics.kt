@@ -13,6 +13,9 @@ import java.util.Locale
  * the MAC only by its last four digits.
  */
 object Diagnostics {
+    /** A request that waited at least this long for its turn says so. */
+    private const val QUEUE_NOTE_MS = 1500L
+
     private val IPV4 = Regex("""\b\d{1,3}\.\d{1,3}\.\d{1,3}\.(\d{1,3})\b""")
 
     /** An IPv4 address keeps only its last number: 192.168.1.23 becomes x.x.x.23. */
@@ -56,12 +59,19 @@ object Diagnostics {
                 e.result != null -> "result ${e.result}"
                 else -> maskAddresses(e.error ?: "no answer")
             }
-            appendLine("${clock.format(Date(e.atMs))} ${e.command} ${e.durationMs} ms $outcome")
+            val queued = if (e.waitedMs >= QUEUE_NOTE_MS) ", queued ${e.waitedMs} ms" else ""
+            appendLine("${clock.format(Date(e.atMs))} ${e.command} ${e.durationMs} ms$queued $outcome")
         }
         val answered = entries.filter { it.result != null }
         if (answered.isNotEmpty()) {
             appendLine("Average answer time: ${answered.map { it.durationMs }.average().toLong()} ms, " +
                 "failures: ${entries.count { it.result != 0 }} of ${entries.size}")
+        }
+        val notes = trace?.notes().orEmpty()
+        if (notes.isNotEmpty()) {
+            appendLine()
+            appendLine("Events:")
+            for (n in notes) appendLine("${clock.format(Date(n.atMs))} ${maskAddresses(n.text)}")
         }
     }
 }

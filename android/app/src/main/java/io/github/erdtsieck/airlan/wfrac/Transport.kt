@@ -4,12 +4,16 @@ import android.annotation.SuppressLint
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.net.ConnectException
 import java.net.InetSocketAddress
+import java.net.NoRouteToHostException
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
@@ -59,12 +63,36 @@ internal class PinningTrustManager(private val expectedPin: String?) : X509Trust
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }
 
+/**
+ * Nothing accepted a connection at the unit's address: it is off the network, its module is
+ * between Wi-Fi associations, or it does not listen on its port for the moment (the module
+ * sometimes fails to bind it again for up to an hour). [reason] says which, for diagnostics.
+ * Speaking another protocol would not help: nothing is there to hear it.
+ */
+class UnitUnreachableException(val reason: String, cause: Throwable) : IOException("unreachable: $reason", cause)
+
+/**
+ * The unit accepted the connection but did not answer in time: it is busy, slow (a weak Wi-Fi
+ * signal) or stuck. The protocol it speaks is not in question.
+ */
+class NoAnswerException(val afterMs: Int, cause: Throwable) : IOException("no answer within $afterMs ms", cause)
+
+/**
+ * The unit answered, in the other protocol: plain HTTP to a TLS request or TLS to a plain
+ * one. The only failure that says the unit's scheme is not the one we used.
+ */
+class WrongProtocolException(message: String, cause: Throwable? = null) : IOException(message, cause)
+
 internal class HttpResult(val status: Int, val body: String, val certificatePin: String?)
 
 /**
  * One POST over a fresh connection, written with a single write() call. The module's
  * embedded web server only reads a body that arrives in the same TCP packet as the headers;
  * HTTP clients that write them separately get "501 Not supported this command".
+ *
+ * Failures are told apart by what they say about the unit (see [UnitUnreachableException],
+ * [NoAnswerException], [WrongProtocolException]); a changed HTTPS certificate is an
+ * [SSLException] of its own.
  */
 internal fun post(
     scheme: Scheme,
@@ -72,7 +100,8 @@ internal fun post(
     port: Int,
     path: String,
     body: String,
-    timeoutMs: Int,
+    connectTimeoutMs: Int,
+    readTimeoutMs: Int,
     certificatePin: String?,
 ): HttpResult {
     val payload = body.toByteArray()
@@ -86,32 +115,66 @@ internal fun post(
 
     val tcp = Socket()
     try {
-        tcp.connect(InetSocketAddress(host, port), timeoutMs)
-        tcp.soTimeout = timeoutMs
-        var trust: PinningTrustManager? = null
-        val socket = when (scheme) {
-            Scheme.HTTP -> tcp
-            Scheme.HTTPS -> {
-                trust = PinningTrustManager(certificatePin)
-                val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
-                (context.socketFactory.createSocket(tcp, host, port, true) as SSLSocket).apply {
-                    // The module runs mbedTLS 2.4 (2016): allow whatever older protocol it may need.
-                    enabledProtocols = supportedProtocols
-                    startHandshake()
+        try {
+            tcp.connect(InetSocketAddress(host, port), connectTimeoutMs)
+        } catch (e: SocketTimeoutException) {
+            throw UnitUnreachableException("no connection within $connectTimeoutMs ms", e)
+        } catch (e: NoRouteToHostException) {
+            throw UnitUnreachableException("no route to the address", e)
+        } catch (e: ConnectException) {
+            throw UnitUnreachableException("connection refused", e)
+        } catch (e: IOException) {
+            throw UnitUnreachableException(e.javaClass.simpleName, e)
+        }
+        tcp.soTimeout = readTimeoutMs
+        try {
+            var trust: PinningTrustManager? = null
+            val socket = when (scheme) {
+                Scheme.HTTP -> tcp
+                Scheme.HTTPS -> {
+                    trust = PinningTrustManager(certificatePin)
+                    val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
+                    (context.socketFactory.createSocket(tcp, host, port, true) as SSLSocket).apply {
+                        // The module runs mbedTLS 2.4 (2016): allow whatever older protocol it may need.
+                        enabledProtocols = supportedProtocols
+                        try {
+                            startHandshake()
+                        } catch (e: SSLException) {
+                            if (answeredInPlainText(e)) throw WrongProtocolException("the unit answered TLS in plain text", e)
+                            throw e
+                        }
+                    }
                 }
             }
-        }
-        socket.use {
-            it.getOutputStream().apply {
-                write(request)
-                flush()
+            socket.use {
+                it.getOutputStream().apply {
+                    write(request)
+                    flush()
+                }
+                val (status, text) = readResponse(it.getInputStream())
+                return HttpResult(status, text, trust?.observedPin)
             }
-            val (status, text) = readResponse(it.getInputStream())
-            return HttpResult(status, text, trust?.observedPin)
+        } catch (e: SocketTimeoutException) {
+            throw NoAnswerException(readTimeoutMs, e)
         }
     } finally {
         tcp.close()
     }
+}
+
+/**
+ * Whether a failed handshake means the other side does not speak TLS (it answered in plain
+ * text), as opposed to a certificate that changed or a connection that was cut.
+ */
+private fun answeredInPlainText(e: SSLException): Boolean {
+    var cause: Throwable? = e
+    while (cause != null) {
+        if (cause is CertificateException) return false
+        cause = cause.cause
+    }
+    val text = generateSequence<Throwable>(e) { it.cause }.joinToString(" ") { it.message.orEmpty() }
+    return listOf("plaintext", "unrecognized ssl message", "wrong_version_number", "wrong version number", "packet_length_too_long", "packet length too long")
+        .any { text.contains(it, ignoreCase = true) }
 }
 
 private fun readResponse(input: InputStream): Pair<Int, String> {
@@ -121,6 +184,10 @@ private fun readResponse(input: InputStream): Pair<Int, String> {
         val b = input.read()
         if (b < 0) throw WfRacException(WfRacException.BAD_RESPONSE, "connection closed before the response headers ended")
         head.write(b)
+        // A TLS server answers a plain request with a TLS record (an alert); say so at once.
+        if (head.size() == 5 && head.toString(Charsets.ISO_8859_1.name()) != "HTTP/") {
+            throw WrongProtocolException("not an HTTP response")
+        }
         last4 = (last4 shl 8) or b
         if (head.size() > 16_384) throw WfRacException(WfRacException.BAD_RESPONSE, "response headers too large")
     }

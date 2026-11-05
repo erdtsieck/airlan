@@ -39,6 +39,8 @@ class RepositoryTest {
      */
     private class FakeUnit(var state: AirconState, val airconId: String = "e81656cb0d45", port: Int = 0) {
         val commands: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        /** Every connection accepted, including ones that never sent a request (a port probe). */
+        @Volatile var connections = 0
         val accounts: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
         @Volatile var lockWriter: String? = null
         @Volatile var lockExpires = 0L
@@ -78,9 +80,11 @@ class RepositoryTest {
             thread(isDaemon = true) {
                 while (!server.isClosed) {
                     val s = try { server.accept() } catch (e: IOException) { break }
+                    connections++
                     s.use {
                         val buf = ByteArray(8192)
-                        val n = it.getInputStream().read(buf)
+                        val n = try { it.getInputStream().read(buf) } catch (e: IOException) { -1 }
+                        if (n <= 0) return@use
                         val raw = String(buf, 0, n).substringAfter("\r\n\r\n")
                         if ("\\/" in raw) sawEscapedSlash = true
                         val payload = JSONObject(raw)
@@ -138,10 +142,13 @@ class RepositoryTest {
     private var announced = emptyList<Announced>()
     private val slept = mutableListOf<Long>()
 
-    private fun repository(port: Int = unit.port) = Repository(
-        UnitStore(File(dir, "state.json")), timers, { emptyList() }, port,
-        clientIntervalMs = 0, timezone = { "Europe/Amsterdam" }, now = { clock }, localNetworkAllowed = { networkAllowed },
-        announced = { announced },
+    private var localAddresses = emptyList<io.github.erdtsieck.airlan.discovery.LocalAddress>()
+    private var announceCalls = 0
+
+    private fun repository(port: Int = unit.port, readTimeoutMs: Int = 10_000) = Repository(
+        UnitStore(File(dir, "state.json")), timers, { localAddresses }, port,
+        clientIntervalMs = 0, clientReadTimeoutMs = readTimeoutMs, timezone = { "Europe/Amsterdam" }, now = { clock }, localNetworkAllowed = { networkAllowed },
+        announced = { announceCalls++; announced },
         sleep = { ms -> slept += ms; clock += ms },
     )
 
@@ -429,7 +436,8 @@ class RepositoryTest {
         val repo = repository()
         val demo = repo.addDemo("Demo unit")
         repo.add("127.0.0.1")
-        assertEquals(0, repo.scan())
+        // The real unit is confirmed through its own client; the demo unit is not counted.
+        assertEquals(1, repo.scan())
         assertEquals(listOf(demo.airconId, "e81656cb0d45"), repo.units.value.units.map { it.airconId })
         assertEquals(demo, repo.units.value.units.first())
         assertFalse(unit.commands.isEmpty())
@@ -664,5 +672,59 @@ class RepositoryTest {
     fun `adding an address where no unit answers fails clearly`(): Unit = runBlocking {
         val closedPort = ServerSocket(0).use { it.localPort }
         repository(port = closedPort).add("127.0.0.1")
+    }
+
+    // Regression: a unit that answered slowly was searched for (mDNS, then a port scan of the
+    // whole network every minute), which adds traffic to a module that takes one connection
+    // at a time. A unit that accepts the connection is where it was.
+    @Test
+    fun `a unit that is slow to answer is not searched for`() = runBlocking {
+        val silent = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
+        thread(isDaemon = true) {
+            while (!silent.isClosed) {
+                val s = try { silent.accept() } catch (e: IOException) { break }
+                thread(isDaemon = true) { s.use { Thread.sleep(3000) } }
+            }
+        }
+        try {
+            repository().add("127.0.0.1")
+            val repo = repository(port = silent.localPort, readTimeoutMs = 300)
+            try {
+                repo.state(ID)
+                org.junit.Assert.fail("expected no answer")
+            } catch (e: io.github.erdtsieck.airlan.wfrac.NoAnswerException) {
+                // As expected.
+            }
+            assertEquals(0, announceCalls)
+        } finally {
+            silent.close()
+        }
+    }
+
+    // Regression: a scan port-probed and re-adopted known units too, through connections of
+    // its own, cutting across the requests their own clients were making.
+    @Test
+    fun `a scan leaves the addresses of known units to their own clients`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        val before = unit.connections
+        val beforeCommands = unit.commands.size
+        // A /30 around 127.0.0.2 makes 127.0.0.1 one of the addresses to probe.
+        localAddresses = listOf(io.github.erdtsieck.airlan.discovery.LocalAddress("127.0.0.2", 30))
+        announced = listOf(Announced(ID, "127.0.0.1"))
+        assertEquals(1, repo.scan())
+        // One connection: the known unit's own client asking its state, no probe, no getDeviceInfo.
+        assertEquals(1, unit.connections - before)
+        assertEquals(listOf("getAirconStat"), unit.commands.drop(beforeCommands))
+    }
+
+    @Test
+    fun `a search from a unit that is gone does not count or touch the known units`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        localAddresses = listOf(io.github.erdtsieck.airlan.discovery.LocalAddress("127.0.0.2", 30))
+        val before = unit.connections
+        assertEquals(0, repo.scan(verifyKnown = false))
+        assertEquals(before, unit.connections)
     }
 }

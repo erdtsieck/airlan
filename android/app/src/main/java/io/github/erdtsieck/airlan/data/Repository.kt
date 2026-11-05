@@ -8,6 +8,7 @@ import io.github.erdtsieck.airlan.wfrac.AirconClient
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.DemoClient
 import io.github.erdtsieck.airlan.wfrac.RequestTrace
+import io.github.erdtsieck.airlan.wfrac.UnitUnreachableException
 import io.github.erdtsieck.airlan.wfrac.WFRAC_PORT
 import io.github.erdtsieck.airlan.wfrac.WfRacClient
 import io.github.erdtsieck.airlan.wfrac.WfRacException
@@ -48,6 +49,8 @@ class Repository(
     private val localAddresses: () -> List<LocalAddress>,
     private val port: Int = WFRAC_PORT,
     private val clientIntervalMs: Long = 1100,
+    /** How long a connected unit gets to answer; see [WfRacClient]. */
+    private val clientReadTimeoutMs: Int = 10_000,
     private val timezone: () -> String = { TimeZone.getDefault().id },
     private val now: () -> Long = System::currentTimeMillis,
     private val localNetworkAllowed: () -> Boolean = { true },
@@ -92,20 +95,25 @@ class Repository(
     private fun newClient(unit: StoredUnit): AirconClient {
         if (unit.demo) return DemoClient(now)
         val ids = store.state.value
-        val trace = traces.getOrPut(unit.airconId) { RequestTrace() }
-        return WfRacClient(unit.host, ids.deviceId, unit.scheme, unit.certificatePin, port, clientIntervalMs, now = now, trace = trace)
+        return WfRacClient(unit.host, ids.deviceId, unit.scheme, unit.certificatePin, port, clientIntervalMs, readTimeoutMs = clientReadTimeoutMs, now = now, trace = traceOf(unit.airconId))
     }
+
+    private fun traceOf(airconId: String) = traces.getOrPut(airconId) { RequestTrace() }
 
     private fun require(airconId: String) = store.unit(airconId) ?: throw IllegalArgumentException("unknown unit $airconId")
 
-    /** Runs [block] against a unit; on a network failure, looks for the unit and retries if it moved. */
+    /**
+     * Runs [block] against a unit. When nothing answers at its address at all, looks for the
+     * unit (DHCP may have moved it) and retries if it moved. A unit that accepts the connection
+     * but answers slowly or not at all is still there: searching would only add traffic.
+     */
     private suspend fun <T> withUnit(airconId: String, block: suspend (AirconClient) -> T): T {
         val unit = require(airconId)
         if (needsNetworkPermission(unit)) throw LocalNetworkNotAllowedException()
         val client = clientFor(unit)
         try {
             return block(client)
-        } catch (e: IOException) {
+        } catch (e: UnitUnreachableException) {
             if (unit.demo || !relocate(unit)) throw e
             return block(clientFor(require(airconId)))
         } finally {
@@ -122,7 +130,10 @@ class Repository(
         val found = announced().firstOrNull { it.airconId == unit.airconId }
         when {
             found != null && found.host != unit.host -> runCatching { adopt(found.host) }
-            found == null && now() - lastScan >= 60_000 -> scan()
+            found == null && now() - lastScan >= 60_000 -> {
+                traceOf(unit.airconId).note("not found by mDNS: searching the network", now())
+                scan(verifyKnown = false)
+            }
         }
         val host = store.unit(unit.airconId)?.host
         return host != null && host != unit.host
@@ -239,7 +250,7 @@ class Repository(
     suspend fun adopt(host: String): StoredUnit {
         requireNetwork()
         val ids = store.state.value
-        val probe = WfRacClient(host, ids.deviceId, port = port, minIntervalMs = clientIntervalMs, now = now)
+        val probe = WfRacClient(host, ids.deviceId, port = port, minIntervalMs = clientIntervalMs, readTimeoutMs = clientReadTimeoutMs, now = now)
         val airconId = try {
             probe.getDeviceInfo()
         } catch (e: IOException) {
@@ -247,27 +258,40 @@ class Repository(
         } catch (e: WfRacException) {
             throw NoUnitAtAddressException(host)
         }
+        val before = store.unit(airconId)
         store.update { s ->
             val existing = s.units.firstOrNull { it.airconId == airconId }
             val adopted = (existing ?: StoredUnit(airconId, name = null, host = host))
                 .copy(host = host, scheme = probe.scheme, certificatePin = probe.certificatePin ?: existing?.certificatePin)
             s.copy(units = if (existing == null) s.units + adopted else s.units.map { if (it.airconId == airconId) adopted else it })
         }
-        clients.remove(airconId)
+        // The unit's client (its one request queue) stays unless it must reach the unit differently.
+        if (before != null && (before.host != host || before.scheme != probe.scheme)) {
+            clients.remove(airconId)
+            if (before.host != host) traceOf(airconId).note("address changed from ${before.host} to $host", now())
+        }
         return require(airconId)
     }
 
     /**
      * Looks for units: by mDNS, and by probing every address on the local network for the
-     * module's port, as not every module answers mDNS reliably. Returns the number of units
-     * it found.
+     * module's port, as not every module answers mDNS reliably.
+     *
+     * The addresses of known units are left out of the probe and are not adopted again: a
+     * module takes one connection at a time and wants a second between requests, and a probe
+     * or a second client would cut across the requests its own client is making. A known unit
+     * that moved shows up at an address that is not known, or by mDNS under its own name.
+     * With [verifyKnown], each known unit is also asked for its state through its own client.
+     * Returns the number of units it found (or confirmed).
      */
-    suspend fun scan(): Int = scanMutex.withLock {
+    suspend fun scan(verifyKnown: Boolean = true): Int = scanMutex.withLock {
         requireNetwork()
+        val known = store.state.value.units.filterNot { it.demo }
+        val knownAt = known.associate { it.host to it.airconId }
         var found = 0
         val hosts = coroutineScope {
-            val byMdns = async { announced().map { it.host } }
-            val open = async { Discovery.findOpen(hostsToScan(localAddresses()), port) }
+            val byMdns = async { announced().filterNot { knownAt[it.host] == it.airconId }.map { it.host } }
+            val open = async { Discovery.findOpen(hostsToScan(localAddresses()).filterNot { it in knownAt }, port) }
             LinkedHashSet(byMdns.await() + open.await())
         }
         for (host in hosts) {
@@ -276,6 +300,12 @@ class Repository(
                 found++
             } catch (e: NoUnitAtAddressException) {
                 // Something else listens on the module's port.
+            }
+        }
+        if (verifyKnown) {
+            for (unit in known) {
+                if (store.unit(unit.airconId)?.host != unit.host) continue // Moved, and counted above.
+                if (runCatching { clientFor(unit).getStat(unit.airconId) }.isSuccess) found++
             }
         }
         lastScan = now()

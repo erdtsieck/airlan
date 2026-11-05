@@ -1,0 +1,1 @@
+A unit that was slow to answer once could stay out of reach until the app was restarted; that no longer happens. Slow units get more time to answer, and searching the network no longer disturbs units that are already known. The diagnostics report now says why a request failed (no connection, or no answer in time) and when a unit moved.

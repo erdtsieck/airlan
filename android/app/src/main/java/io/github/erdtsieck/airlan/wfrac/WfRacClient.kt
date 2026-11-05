@@ -17,8 +17,11 @@ const val WFRAC_PORT = 51443
  * second between requests, so requests are serialised and spaced out.
  *
  * The scheme is discovered on first contact and exposed as [scheme] (and the HTTPS
- * certificate pin as [certificatePin]) so the caller can persist them. A transport failure
- * on a known scheme forgets it, so a firmware update that switches protocol is picked up.
+ * certificate pin as [certificatePin]) so the caller can persist them. A known scheme is
+ * only given up when the unit answers in the other protocol ([WrongProtocolException]); a
+ * unit that is out of reach, slow or busy keeps it. Trying the other scheme then would send
+ * a TLS handshake to a plain-HTTP module (or the reverse), which occupies the module's one
+ * connection for nothing and doubles the time each failed request takes.
  */
 class WfRacClient(
     val host: String,
@@ -27,7 +30,9 @@ class WfRacClient(
     override var certificatePin: String? = null,
     private val port: Int = WFRAC_PORT,
     private val minIntervalMs: Long = 1100,
-    private val timeoutMs: Int = 6000,
+    private val connectTimeoutMs: Int = 6000,
+    /** Generous: a unit with a weak Wi-Fi signal can take several seconds to answer. */
+    private val readTimeoutMs: Int = 10_000,
     private val now: () -> Long = System::currentTimeMillis,
     private val operatorId: String = AIRLAN_OPERATOR_ID,
     /** Where requests are recorded for a diagnostics report; shared across clients of one unit. */
@@ -42,7 +47,7 @@ class WfRacClient(
     private fun nowS() = now() / 1000
 
     private fun send(scheme: Scheme, command: String, payload: String): JSONObject {
-        val response = post(scheme, host, port, "/beaver/command/$command", payload, timeoutMs, certificatePin)
+        val response = post(scheme, host, port, "/beaver/command/$command", payload, connectTimeoutMs, readTimeoutMs, certificatePin)
         response.certificatePin?.let { certificatePin = it }
         return try {
             JSONObject(response.body)
@@ -52,18 +57,25 @@ class WfRacClient(
     }
 
     private fun sendDiscovering(command: String, payload: String): JSONObject {
-        scheme?.let { known ->
+        val known = scheme
+        if (known != null) {
             try {
                 return send(known, command, payload)
-            } catch (e: IOException) {
+            } catch (e: WrongProtocolException) {
+                // The unit speaks the other protocol now (a firmware update): find out which.
                 scheme = null
-                throw e
+                trace.note("answered in another protocol than ${known.name.lowercase()}: detecting it again")
             }
         }
         var lastError: Exception? = null
-        for (candidate in Scheme.entries) {
+        val candidates = if (known == null) Scheme.entries else Scheme.entries.sortedBy { it == known }
+        for (candidate in candidates) {
             try {
                 return send(candidate, command, payload).also { scheme = candidate }
+            } catch (e: UnitUnreachableException) {
+                throw e // Nothing listens: the other protocol would not be heard either.
+            } catch (e: NoAnswerException) {
+                throw e // Connected, but slow or busy: says nothing about the protocol.
             } catch (e: IOException) {
                 lastError = e
             } catch (e: WfRacException) {
@@ -73,13 +85,18 @@ class WfRacClient(
         throw lastError!!
     }
 
-    suspend fun request(command: String, contents: Map<String, Any>?, asOperator: String = operatorId): JSONObject = mutex.withLock {
+    suspend fun request(command: String, contents: Map<String, Any>?, asOperator: String = operatorId): JSONObject {
+        val queued = System.currentTimeMillis()
+        return mutex.withLock { requestLocked(command, contents, asOperator, queued) }
+    }
+
+    private suspend fun requestLocked(command: String, contents: Map<String, Any>?, asOperator: String, queued: Long): JSONObject {
         val wait = lastRequestAt + minIntervalMs - System.currentTimeMillis()
         if (wait > 0) delay(wait)
         val started = System.currentTimeMillis()
         var result: Int? = null
         var error: String? = null
-        try {
+        return try {
             val payload = buildMap {
                 put("apiVer", "1.0")
                 put("command", command)
@@ -95,12 +112,21 @@ class WfRacClient(
             if (code != 0) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused $command (result $code)", code)
             body.optJSONObject("contents") ?: JSONObject()
         } catch (e: Exception) {
-            if (result == null) error = e.javaClass.simpleName + (e.message?.let { ": " + it.take(80) } ?: "")
+            if (result == null) error = describe(e)
             throw e
         } finally {
             lastRequestAt = System.currentTimeMillis()
-            trace.add(RequestTrace.Entry(started, command, lastRequestAt - started, result, error))
+            trace.add(RequestTrace.Entry(started, command, lastRequestAt - started, result, error, waitedMs = started - queued))
         }
+    }
+
+    /** What went wrong, in a few words for the diagnostics report. */
+    private fun describe(e: Exception): String = when (e) {
+        is UnitUnreachableException -> "unreachable (${e.reason})"
+        is NoAnswerException -> "connected, no answer within ${e.afterMs / 1000} s"
+        is WrongProtocolException -> "other protocol: ${e.message}"
+        is WfRacException -> "${e.code}: ${e.message?.take(80)}"
+        else -> e.javaClass.simpleName + (e.message?.let { ": " + it.take(80) } ?: "")
     }
 
     suspend fun getDeviceInfo(): String = request("getDeviceInfo", emptyMap()).getString("airconId")

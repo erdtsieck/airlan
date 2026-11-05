@@ -180,13 +180,38 @@ const legacyTls = {
   secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT,
 };
 
+const CONNECT_TIMEOUT_MS = 6000;
+/** Generous: a unit with a weak Wi-Fi signal can take several seconds to answer. */
+const READ_TIMEOUT_MS = 10_000;
+
+const tagged = (message, code, cause) => Object.assign(new Error(message, { cause }), { code });
+
+/**
+ * What a failed request says about the unit (see WfRacClient's scheme handling):
+ *   'unreachable'    - nothing accepted the connection: off the network, between Wi-Fi
+ *                      associations, or not listening on its port for the moment
+ *   'no_answer'      - connected, but no answer in time: busy, slow or stuck
+ *   'wrong_protocol' - it answered in the other protocol (plain HTTP to TLS or the reverse)
+ *   'other'          - anything else, e.g. a connection cut halfway
+ */
+export function failureKind(e) {
+  if (e instanceof WfRacError) return 'other';
+  const code = e.code ?? '';
+  if (['EUNREACHABLE', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EHOSTDOWN', 'EADDRNOTAVAIL'].includes(code)) return 'unreachable';
+  if (code === 'ENOANSWER') return 'no_answer';
+  const text = `${code} ${e.message ?? ''}`.toLowerCase();
+  if (code.startsWith('HPE_') || ['wrong version number', 'wrong_version_number', 'packet length too long', 'packet_length_too_long', 'unknown protocol'].some((t) => text.includes(t))) return 'wrong_protocol';
+  return 'other';
+}
+
 /**
  * One POST without keep-alive. Deliberately node:http and not fetch: the module's
  * embedded web server only reads a body that arrives in the same TCP packet as the
  * headers, and fetch (undici) sends them separately - the module then answers
- * "501 Not supported this command".
+ * "501 Not supported this command". Timeouts are told apart (see failureKind): getting no
+ * connection is not the same as getting no answer on one.
  */
-function post(scheme, host, port, command, payload) {
+function post(scheme, host, port, command, payload, { connectTimeoutMs = CONNECT_TIMEOUT_MS, readTimeoutMs = READ_TIMEOUT_MS } = {}) {
   const body = JSON.stringify(payload);
   const transport = scheme === 'https' ? https : http;
   return new Promise((resolve, reject) => {
@@ -197,7 +222,6 @@ function post(scheme, host, port, command, payload) {
         path: `/beaver/command/${command}`,
         method: 'POST',
         agent: false,
-        timeout: 6000,
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
         ...(scheme === 'https' ? legacyTls : {}),
       },
@@ -214,7 +238,17 @@ function post(scheme, host, port, command, payload) {
         });
       },
     );
-    req.on('timeout', () => req.destroy(Object.assign(new Error('unit did not respond'), { code: 'ETIMEDOUT' })));
+    req.on('socket', (socket) => {
+      const noConnection = setTimeout(
+        () => req.destroy(tagged(`no connection within ${connectTimeoutMs} ms`, 'EUNREACHABLE')),
+        connectTimeoutMs,
+      );
+      socket.once('connect', () => {
+        clearTimeout(noConnection);
+        socket.setTimeout(readTimeoutMs, () => req.destroy(tagged(`connected, no answer within ${readTimeoutMs / 1000} s`, 'ENOANSWER')));
+      });
+      socket.once('close', () => clearTimeout(noConnection));
+    });
     req.on('error', reject);
     req.end(body);
   });
@@ -239,6 +273,28 @@ export class RequestTrace {
   entries() {
     return [...this.#entries];
   }
+
+  #notes = [];
+
+  /** Something that happened to the unit besides a request: it moved, the network was searched. */
+  note(text, at = Date.now()) {
+    if (this.#notes.length === this.capacity) this.#notes.shift();
+    this.#notes.push({ at, text });
+  }
+
+  notes() {
+    return [...this.#notes];
+  }
+}
+
+/** What went wrong with a request, in a few words for the diagnostics report. */
+function describe(e) {
+  switch (failureKind(e)) {
+    case 'unreachable': return `unreachable (${e.code === 'EUNREACHABLE' ? e.message : e.code})`;
+    case 'no_answer': return e.message;
+    case 'wrong_protocol': return `other protocol: ${e.code ?? ''} ${String(e.message).slice(0, 60)}`.trim();
+    default: return `${e.code ?? e.name}: ${String(e.message).slice(0, 80)}`;
+  }
 }
 
 /**
@@ -246,8 +302,10 @@ export class RequestTrace {
  * a second between requests, so all requests go through a queue.
  *
  * The scheme (http/https) is discovered on first contact and exposed as `scheme` so the
- * caller can persist it. A transport failure on a known scheme forgets it again, so a
- * firmware update that switches protocol is picked up on the next request.
+ * caller can persist it. A known scheme is only given up when the unit answers in the other
+ * protocol; a unit that is out of reach, slow or busy keeps it. Trying the other scheme then
+ * would send a TLS handshake to a plain-HTTP module (or the reverse), which occupies the
+ * module's one connection for nothing and doubles the time each failed request takes.
  */
 export class WfRacClient {
   #queue = Promise.resolve();
@@ -259,8 +317,9 @@ export class WfRacClient {
    * `trace` records the last requests (and what getAirconStat says about the module) for a
    * diagnostics report; pass the same one to every client of a unit to keep it across them.
    */
-  constructor({ host, port = PORT, scheme = null, deviceId, operatorId = AIRLAN_OPERATOR_ID, minIntervalMs = 1100, trace = new RequestTrace() }) {
+  constructor({ host, port = PORT, scheme = null, deviceId, operatorId = AIRLAN_OPERATOR_ID, minIntervalMs = 1100, trace = new RequestTrace(), timeouts = {} }) {
     this.host = host;
+    this.timeouts = timeouts;
     this.trace = trace;
     this.port = port;
     this.scheme = scheme;
@@ -270,21 +329,27 @@ export class WfRacClient {
   }
 
   async #send(command, payload) {
-    if (this.scheme) {
+    const known = this.scheme;
+    if (known) {
       try {
-        return await post(this.scheme, this.host, this.port, command, payload);
+        return await post(known, this.host, this.port, command, payload, this.timeouts);
       } catch (e) {
-        if (!(e instanceof WfRacError)) this.scheme = null;
-        throw e;
+        if (failureKind(e) !== 'wrong_protocol') throw e;
+        // The unit speaks the other protocol now (a firmware update): find out which.
+        this.scheme = null;
+        this.trace.note(`answered in another protocol than ${known}: detecting it again`);
       }
     }
     let lastError;
-    for (const scheme of ['http', 'https']) {
+    const candidates = known === 'http' ? ['https', 'http'] : ['http', 'https'];
+    for (const scheme of candidates) {
       try {
-        const body = await post(scheme, this.host, this.port, command, payload);
+        const body = await post(scheme, this.host, this.port, command, payload, this.timeouts);
         this.scheme = scheme;
         return body;
       } catch (e) {
+        // Nothing listens, or it is slow or busy: the other protocol would not fare better.
+        if (['unreachable', 'no_answer'].includes(failureKind(e))) throw e;
         lastError = e;
       }
     }
@@ -292,6 +357,7 @@ export class WfRacClient {
   }
 
   request(command, contents, { operatorId = this.operatorId } = {}) {
+    const queued = Date.now();
     const run = async () => {
       const wait = this.#lastRequestAt + this.minIntervalMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -311,11 +377,11 @@ export class WfRacClient {
         if (body.result !== 0) throw new WfRacError('unit_refused', `unit refused ${command} (result ${body.result})`, body.result);
         return body.contents;
       } catch (e) {
-        if (result === null) error = `${e.code ?? e.name}: ${String(e.message).slice(0, 80)}`;
+        if (result === null) error = describe(e);
         throw e;
       } finally {
         this.#lastRequestAt = Date.now();
-        this.trace.add({ at: started, command, ms: this.#lastRequestAt - started, result, error });
+        this.trace.add({ at: started, command, ms: this.#lastRequestAt - started, result, error, waitedMs: started - queued });
       }
     };
     const p = this.#queue.then(run, run);

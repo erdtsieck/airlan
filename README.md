@@ -218,7 +218,12 @@ Errors come back as `{ "error": { "code", "message" } }` with `code` one of
   vane. A unit whose left/right vane is on swing looks the same as such a unit until it is
   set to a direction once, with its remote control or another app.
 - **One request at a time.** The module accepts one connection at a time and about one
-  request per second. AirLAN queues requests per unit.
+  request per second. AirLAN queues requests per unit, and only that queue talks to a known
+  unit: a network search leaves the addresses of known units alone.
+- **Transport stays put.** Once AirLAN knows whether a unit speaks HTTP or HTTPS, a unit
+  that is out of reach or slow to answer keeps it. Only an answer in the other protocol
+  makes AirLAN detect it again; trying TLS on a plain-HTTP module (or the reverse) would
+  only keep its one connection busy.
 - **No `fetch`.** The module only reads a request body that arrives in the same TCP packet
   as the headers. Node's `fetch` sends them separately and gets
   "501 Not supported this command", so AirLAN uses `node:http`.

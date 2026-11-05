@@ -43,6 +43,21 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun `a request that queued long and events such as a move are reported, addresses masked`() {
+        val trace = RequestTrace()
+        trace.add(RequestTrace.Entry(0, "getAirconStat", 10_000, null, "connected, no answer within 10 s", waitedMs = 4_200))
+        trace.add(RequestTrace.Entry(1_000, "getAirconStat", 90, 0, null, waitedMs = 200))
+        trace.note("address changed from 192.168.68.116 to 192.168.68.120", 2_000)
+
+        val report = Diagnostics.report("0.3.2", "16", unit, null, trace, 0)
+
+        assertTrue(report, report.contains("getAirconStat 10000 ms, queued 4200 ms connected, no answer within 10 s"))
+        assertTrue(report, report.contains("getAirconStat 90 ms result 0"))
+        assertTrue(report, report.contains("Events:"))
+        assertTrue(report, report.contains("address changed from x.x.x.116 to x.x.x.120"))
+    }
+
+    @Test
     fun `a demo unit says so and has no module`() {
         val report = Diagnostics.report("0.3.0", "16", StoredUnit("demo", "Demo", "", demo = true), null, null, 0)
         assertTrue(report, report.contains("Unit: demo (simulated)"))
