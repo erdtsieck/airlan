@@ -23,8 +23,8 @@ data class StoredUnit(
     val host: String,
     val scheme: Scheme? = null,
     val certificatePin: String? = null,
-    /** The pending switch-off, if a timer is set. */
-    val timer: OffTimer? = null,
+    /** The pending timers, at most one per action. */
+    val timers: Map<TimerAction, UnitTimer> = emptyMap(),
     val demo: Boolean = false,
     /** Moved off [StoreState.legacyOperatorId] to the shared account; see [Repository.migrateAccounts]. */
     val accountMigrated: Boolean = false,
@@ -52,23 +52,6 @@ val StoredUnit.macLabel: String
     } else {
         airconId
     }
-
-/**
- * A pending switch-off, retries included. This is the single source of truth for the unit's
- * alarm: Android can drop alarms (reboot, update, a revoked exact-alarm permission), so the
- * alarm is always derived from this, never the other way round.
- */
-data class OffTimer(
-    /** Epoch millis at which the user wants the unit off. */
-    val at: Long,
-    /** Attempts to switch the unit off that have failed so far. */
-    val failedAttempts: Int = 0,
-    /** Epoch millis of the next attempt after a failure; null before the first attempt. */
-    val retryAt: Long? = null,
-) {
-    /** When the alarm should go off next. */
-    val dueAt get() = retryAt ?: at
-}
 
 /**
  * [deviceId] is this installation's own: the unit's write lock tells writers apart by it. The
@@ -113,15 +96,14 @@ class UnitStore(private val file: File) {
                     host = u.getString("host"),
                     scheme = u.optString("scheme").takeIf { it.isNotEmpty() }?.let(Scheme::valueOf),
                     certificatePin = u.optString("certificatePin").takeIf { it.isNotEmpty() },
-                    timer = if (u.has("offAt")) {
-                        OffTimer(
-                            at = u.getLong("offAt"),
-                            failedAttempts = u.optInt("offFailedAttempts", 0),
-                            retryAt = if (u.has("offRetryAt")) u.getLong("offRetryAt") else null,
+                    timers = TimerAction.entries.mapNotNull { a ->
+                        if (!u.has("${a.key}At")) return@mapNotNull null
+                        a to UnitTimer(
+                            at = u.getLong("${a.key}At"),
+                            failedAttempts = u.optInt("${a.key}FailedAttempts", 0),
+                            retryAt = if (u.has("${a.key}RetryAt")) u.getLong("${a.key}RetryAt") else null,
                         )
-                    } else {
-                        null
-                    },
+                    }.toMap(),
                     demo = u.optBoolean("demo", false),
                     accountMigrated = u.optBoolean("accountMigrated", false),
                     modelNrRaw = if (u.has("modelNrRaw")) u.getInt("modelNrRaw") else null,
@@ -146,10 +128,11 @@ class UnitStore(private val file: File) {
                             .apply {
                                 u.scheme?.let { put("scheme", it.name) }
                                 u.certificatePin?.let { put("certificatePin", it) }
-                                u.timer?.let { t ->
-                                    put("offAt", t.at)
-                                    if (t.failedAttempts > 0) put("offFailedAttempts", t.failedAttempts)
-                                    t.retryAt?.let { put("offRetryAt", it) }
+                                // "offAt", "offFailedAttempts", "offRetryAt"; the same for "on".
+                                for ((a, t) in u.timers) {
+                                    put("${a.key}At", t.at)
+                                    if (t.failedAttempts > 0) put("${a.key}FailedAttempts", t.failedAttempts)
+                                    t.retryAt?.let { put("${a.key}RetryAt", it) }
                                 }
                                 if (u.demo) put("demo", true)
                                 if (u.accountMigrated) put("accountMigrated", true)

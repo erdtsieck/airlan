@@ -126,11 +126,18 @@ class RepositoryTest {
         fun close() = server.close()
     }
 
+    /** Records alarms; [scheduled] and [cancelled] are the off-timer's, [all] has every action's. */
     private class RecordingTimers : TimerScheduler {
-        val scheduled = mutableListOf<Pair<String, Long>>()
-        val cancelled = mutableListOf<String>()
-        override fun schedule(airconId: String, atMillis: Long) { scheduled += airconId to atMillis }
-        override fun cancel(airconId: String) { cancelled += airconId }
+        val all = mutableListOf<Triple<String, TimerAction, Long>>()
+        val cancelledAll = mutableListOf<Pair<String, TimerAction>>()
+        val scheduled get() = all.filter { it.second == TimerAction.OFF }.map { it.first to it.third }.toMutableList()
+        val cancelled get() = cancelledAll.filter { it.second == TimerAction.OFF }.map { it.first }
+        override fun schedule(airconId: String, action: TimerAction, atMillis: Long) { all += Triple(airconId, action, atMillis) }
+        override fun cancel(airconId: String, action: TimerAction) { cancelledAll += airconId to action }
+        fun clear() {
+            all.clear()
+            cancelledAll.clear()
+        }
     }
 
     private val dir = Files.createTempDirectory("airlan").toFile()
@@ -259,21 +266,21 @@ class RepositoryTest {
         val repo = repository()
         repo.add("127.0.0.1")
         repo.apply("e81656cb0d45") { it.copy(power = true) }
-        repo.setTimer("e81656cb0d45", 30)
+        repo.setOffTimer("e81656cb0d45", 30)
         assertEquals(clock + 30 * 60_000L, timers.scheduled.last().second)
 
         clock += 30 * 60_000L
-        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer("e81656cb0d45"))
+        assertEquals(Repository.TimerOutcome.Switched, repo.fireTimer("e81656cb0d45", TimerAction.OFF))
         assertFalse(unit.state.power)
-        assertNull(repository().units.value.units.single().timer)
+        assertNull(repository().units.value.units.single().timers[TimerAction.OFF])
     }
 
     @Test
     fun `an early alarm is put back instead of switching off`() = runBlocking {
         val repo = repository()
         repo.add("127.0.0.1")
-        repo.setTimer("e81656cb0d45", 60)
-        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer("e81656cb0d45"))
+        repo.setOffTimer("e81656cb0d45", 60)
+        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer("e81656cb0d45", TimerAction.OFF))
         assertEquals(2, timers.scheduled.size)
     }
 
@@ -281,13 +288,13 @@ class RepositoryTest {
     private suspend fun dueTimerOnUnreachableUnit(): Long {
         val repo = repository()
         repo.add("127.0.0.1")
-        repo.setTimer(ID, 1)
+        repo.setOffTimer(ID, 1)
         unit.close()
         clock += 60_000L
         return clock
     }
 
-    private fun storedTimer() = repository().units.value.units.single().timer
+    private fun storedTimer(action: TimerAction = TimerAction.OFF) = repository().units.value.units.single().timers[action]
 
     private fun Repository.stored() = units.value.units.single { it.airconId == ID }
 
@@ -297,13 +304,13 @@ class RepositoryTest {
         val repo = repository()
         val delays = mutableListOf<Long>()
         while (true) {
-            val outcome = repo.fireTimer(ID)
+            val outcome = repo.fireTimer(ID, TimerAction.OFF)
             if (outcome !is Repository.TimerOutcome.Retrying) {
                 assertTrue(outcome is Repository.TimerOutcome.GaveUp)
                 break
             }
             val retryAt = timers.scheduled.last().second
-            assertEquals(OffTimer(at, failedAttempts = outcome.attempt, retryAt = retryAt), storedTimer())
+            assertEquals(UnitTimer(at, failedAttempts = outcome.attempt, retryAt = retryAt), storedTimer())
             delays += retryAt - clock
             clock = retryAt
         }
@@ -312,17 +319,17 @@ class RepositoryTest {
         assertTrue(clock - at <= Repository.TIMER_GIVE_UP_MS)
         assertNull(storedTimer())
         assertEquals(listOf(ID), timers.cancelled)
-        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer(ID))
+        assertEquals(Repository.TimerOutcome.NotDue, repo.fireTimer(ID, TimerAction.OFF))
     }
 
     @Test
     fun `the retry count survives a restart`() = runBlocking {
         val at = dueTimerOnUnreachableUnit()
-        assertEquals(Repository.TimerOutcome.Retrying(1), repository().fireTimer(ID))
+        assertEquals(Repository.TimerOutcome.Retrying(1), repository().fireTimer(ID, TimerAction.OFF))
         clock += 30_000L
 
-        assertEquals(Repository.TimerOutcome.Retrying(2), repository().fireTimer(ID))
-        assertEquals(OffTimer(at, failedAttempts = 2, retryAt = clock + 60_000L), storedTimer())
+        assertEquals(Repository.TimerOutcome.Retrying(2), repository().fireTimer(ID, TimerAction.OFF))
+        assertEquals(UnitTimer(at, failedAttempts = 2, retryAt = clock + 60_000L), storedTimer())
         val json = JSONObject(File(dir, "state.json").readText()).getJSONArray("units").getJSONObject(0)
         assertEquals(2, json.getInt("offFailedAttempts"))
         assertEquals(at, json.getLong("offAt"))
@@ -331,19 +338,19 @@ class RepositoryTest {
     @Test
     fun `rescheduling after a restart keeps a pending retry and its count`() = runBlocking {
         val at = dueTimerOnUnreachableUnit()
-        repository().fireTimer(ID)
+        repository().fireTimer(ID, TimerAction.OFF)
         val retryAt = clock + 30_000L
-        timers.scheduled.clear()
+        timers.clear()
 
         val restarted = repository()
         restarted.rescheduleAll()
         assertEquals(listOf(ID to retryAt), timers.scheduled)
-        assertEquals(OffTimer(at, failedAttempts = 1, retryAt = retryAt), storedTimer())
+        assertEquals(UnitTimer(at, failedAttempts = 1, retryAt = retryAt), storedTimer())
 
         // The alarm rescheduleAll set can go off along with the retry alarm; only one attempt counts.
-        assertEquals(Repository.TimerOutcome.NotDue, restarted.fireTimer(ID))
+        assertEquals(Repository.TimerOutcome.NotDue, restarted.fireTimer(ID, TimerAction.OFF))
         clock = retryAt
-        assertEquals(Repository.TimerOutcome.Retrying(2), restarted.fireTimer(ID))
+        assertEquals(Repository.TimerOutcome.Retrying(2), restarted.fireTimer(ID, TimerAction.OFF))
     }
 
     @Test
@@ -353,14 +360,14 @@ class RepositoryTest {
         while (outcomes.lastOrNull().let { it == null || it is Repository.TimerOutcome.Retrying }) {
             val repo = repository()
             repo.rescheduleAll()
-            outcomes += repo.fireTimer(ID)
+            outcomes += repo.fireTimer(ID, TimerAction.OFF)
             storedTimer()?.let { clock = it.dueAt }
         }
         assertEquals((1 until outcomes.size).map { Repository.TimerOutcome.Retrying(it) }, outcomes.dropLast(1))
         assertTrue(outcomes.last() is Repository.TimerOutcome.GaveUp)
         assertTrue(clock - at <= Repository.TIMER_GIVE_UP_MS)
         assertNull(storedTimer())
-        timers.scheduled.clear()
+        timers.clear()
         repository().rescheduleAll()
         assertTrue(timers.scheduled.isEmpty())
     }
@@ -370,7 +377,7 @@ class RepositoryTest {
         File(dir, "state.json").writeText(
             """{"deviceId": "airlan-1", "operatorId": "op", "units": [{"airconId": "$ID", "name": "Woonkamer", "host": "127.0.0.1", "offAt": 1234}]}""",
         )
-        assertEquals(OffTimer(1234), storedTimer())
+        assertEquals(UnitTimer(1234), storedTimer())
         repository().rescheduleAll()
         assertEquals(listOf(ID to 1234L), timers.scheduled)
     }
@@ -379,10 +386,96 @@ class RepositoryTest {
     fun `switching off by hand cancels the timer`() = runBlocking {
         val repo = repository()
         repo.add("127.0.0.1")
-        repo.setTimer("e81656cb0d45", 120)
+        repo.setOffTimer("e81656cb0d45", 120)
         repo.apply("e81656cb0d45") { it.copy(power = false) }
         assertEquals(listOf("e81656cb0d45"), timers.cancelled)
-        assertNull(repo.units.value.units.single().timer)
+        assertNull(repo.units.value.units.single().timers[TimerAction.OFF])
+    }
+
+    /** 07:00 in Amsterdam on the test clock's day (1 January 1970, CET). */
+    private val sevenAm = 6 * 3_600_000L
+
+    @Test
+    fun `an on-timer goes off at the next 07-00 and switches on with the last settings`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        repo.apply(ID) { it.copy(power = true, mode = Mode.HEAT, presetTemp = 23.5, airFlow = 2) }
+        repo.apply(ID) { it.copy(power = false) }
+
+        repo.setOnTimer(ID, 7, 0)
+        assertEquals(Triple(ID, TimerAction.ON, sevenAm), timers.all.last())
+        assertEquals(UnitTimer(sevenAm), storedTimer(TimerAction.ON))
+
+        clock = sevenAm
+        assertEquals(Repository.TimerOutcome.Switched, repo.fireTimer(ID, TimerAction.ON))
+        assertTrue(unit.state.power)
+        assertEquals(Mode.HEAT, unit.state.mode)
+        assertEquals(23.5, unit.state.presetTemp, 0.0)
+        assertEquals(2, unit.state.airFlow)
+        assertNull(storedTimer(TimerAction.ON))
+    }
+
+    @Test
+    fun `a unit has one timer per action, and switching off by hand keeps the on-timer`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        repo.apply(ID) { it.copy(power = true) }
+        repo.setOffTimer(ID, 30)
+        repo.setOnTimer(ID, 6, 0)
+        repo.setOnTimer(ID, 7, 0)
+        assertEquals(mapOf(TimerAction.OFF to UnitTimer(clock + 30 * 60_000L), TimerAction.ON to UnitTimer(sevenAm)), repo.stored().timers)
+
+        repo.apply(ID) { it.copy(power = false) }
+        assertEquals(mapOf(TimerAction.ON to UnitTimer(sevenAm)), repo.stored().timers)
+        assertEquals(listOf(ID to TimerAction.OFF), timers.cancelledAll)
+
+        repo.cancelTimer(ID, TimerAction.ON)
+        assertTrue(repo.stored().timers.isEmpty())
+    }
+
+    @Test
+    fun `an on-timer that cannot reach the unit retries on the same schedule as the off-timer`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        repo.setOnTimer(ID, 7, 0)
+        unit.close()
+        clock = sevenAm
+        assertEquals(Repository.TimerOutcome.Retrying(1), repo.fireTimer(ID, TimerAction.ON))
+        assertEquals(UnitTimer(sevenAm, failedAttempts = 1, retryAt = clock + 30_000L), storedTimer(TimerAction.ON))
+        assertEquals(Triple(ID, TimerAction.ON, clock + 30_000L), timers.all.last())
+        assertTrue(timers.scheduled.isEmpty())
+    }
+
+    @Test
+    fun `both timers are stored, rescheduled after a restart and cancelled when the unit is forgotten`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        repo.apply(ID) { it.copy(power = true) }
+        repo.setOffTimer(ID, 60)
+        repo.setOnTimer(ID, 7, 0)
+        val json = JSONObject(File(dir, "state.json").readText()).getJSONArray("units").getJSONObject(0)
+        assertEquals(sevenAm, json.getLong("onAt"))
+        assertEquals(clock + 60 * 60_000L, json.getLong("offAt"))
+
+        timers.clear()
+        val restarted = repository()
+        restarted.rescheduleAll()
+        assertEquals(setOf(Triple(ID, TimerAction.OFF, clock + 60 * 60_000L), Triple(ID, TimerAction.ON, sevenAm)), timers.all.toSet())
+
+        restarted.forget(ID)
+        assertEquals(setOf(ID to TimerAction.OFF, ID to TimerAction.ON), timers.cancelledAll.toSet())
+    }
+
+    @Test
+    fun `the next occurrence of a time of day is today while it is ahead, else tomorrow`() {
+        val zone = java.time.ZoneId.of("Europe/Amsterdam")
+        fun at(text: String) = java.time.LocalDateTime.parse(text).atZone(zone).toInstant().toEpochMilli()
+        val evening = at("2026-11-06T21:30")
+        assertEquals(at("2026-11-06T22:15"), nextOccurrence(evening, 22, 15, zone))
+        assertEquals(at("2026-11-07T07:00"), nextOccurrence(evening, 7, 0, zone))
+        assertEquals(at("2026-11-07T21:30"), nextOccurrence(evening, 21, 30, zone))
+        // 02:30 does not exist on the night the clocks go forward; it becomes 03:30.
+        assertEquals(at("2027-03-28T03:30"), nextOccurrence(at("2027-03-27T23:00"), 2, 30, zone))
     }
 
     @Test
@@ -422,13 +515,13 @@ class RepositoryTest {
         assertTrue(on.power)
         assertEquals(on, repo.state(id))
 
-        repo.setTimer(id, 30)
+        repo.setOffTimer(id, 30)
         assertEquals(id to clock + 30 * 60_000L, timers.scheduled.last())
         clock += 30 * 60_000L
-        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer(id))
+        assertEquals(Repository.TimerOutcome.Switched, repo.fireTimer(id, TimerAction.OFF))
         assertFalse(repo.state(id).power)
         assertEquals(Mode.HEAT, repo.state(id).mode)
-        assertNull(repo.units.value.units.single().timer)
+        assertNull(repo.units.value.units.single().timers[TimerAction.OFF])
     }
 
     @Test
@@ -448,7 +541,7 @@ class RepositoryTest {
         val repo = repository()
         val id = repo.addDemo("Demo unit").airconId
         repo.apply(id) { it.copy(power = true) }
-        repo.setTimer(id, 60)
+        repo.setOffTimer(id, 60)
         repo.forget(id)
         assertTrue(repo.units.value.units.isEmpty())
         assertEquals(listOf(id), timers.cancelled)
@@ -558,14 +651,14 @@ class RepositoryTest {
         val repo = repository()
         repo.add("127.0.0.1")
         repo.apply(ID) { it.copy(power = true) }
-        repo.setTimer(ID, 1)
+        repo.setOffTimer(ID, 1)
         clock += 60_000L
         unit.clock = clock / 1000
         unit.otherWrite(lockSeconds = 50)
-        assertEquals(Repository.TimerOutcome.Retrying(1), repo.fireTimer(ID))
+        assertEquals(Repository.TimerOutcome.Retrying(1), repo.fireTimer(ID, TimerAction.OFF))
         assertEquals(clock + 52_000L, storedTimer()!!.retryAt)
         clock = storedTimer()!!.dueAt
-        assertEquals(Repository.TimerOutcome.SwitchedOff, repo.fireTimer(ID))
+        assertEquals(Repository.TimerOutcome.Switched, repo.fireTimer(ID, TimerAction.OFF))
         assertFalse(unit.state.power)
     }
 

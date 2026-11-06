@@ -14,6 +14,7 @@ import io.github.erdtsieck.airlan.wfrac.WfRacClient
 import io.github.erdtsieck.airlan.wfrac.WfRacException
 import java.io.IOException
 import java.net.InetAddress
+import java.time.ZoneId
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
@@ -23,15 +24,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 
-/**
- * Schedules the moment a unit's off-timer fires. Backed by AlarmManager on the device. It
- * carries no state of its own: what to do when it fires is read from the stored [OffTimer].
- */
-interface TimerScheduler {
-    fun schedule(airconId: String, atMillis: Long)
-    fun cancel(airconId: String)
-}
-
 /** Nothing answers as a WF-RAC module at the address the user typed. */
 class NoUnitAtAddressException(host: String) : Exception("no WF-RAC module answers at $host")
 
@@ -39,7 +31,7 @@ class NoUnitAtAddressException(host: String) : Exception("no WF-RAC module answe
 class LocalNetworkNotAllowedException : Exception("the local network permission is not granted")
 
 /**
- * Everything the app does with units: discovery, reading, writing and the off-timers.
+ * Everything the app does with units: discovery, reading, writing and the timers.
  * Shared by the UI and the timer receiver, so there is one client (and one request queue)
  * per unit in the process.
  */
@@ -239,7 +231,8 @@ class Repository(
             }
         }
         noteAirflowSupport(airconId, written)
-        if (!written.power) cancelTimer(airconId)
+        // The off-timer belongs to the run it would end. An on-timer stays: it is for a time of day.
+        if (!written.power) cancelTimer(airconId, TimerAction.OFF)
         return written
     }
 
@@ -344,7 +337,7 @@ class Repository(
 
     /** Forgets a unit. Its account stays: it is shared with every other AirLAN client of the unit. */
     suspend fun forget(airconId: String) {
-        timers.cancel(airconId)
+        for (action in TimerAction.entries) timers.cancel(airconId, action)
         store.update { s -> s.copy(units = s.units.filterNot { it.airconId == airconId }) }
         clients.remove(airconId)
     }
@@ -367,69 +360,87 @@ class Repository(
         }
     }
 
-    suspend fun setTimer(airconId: String, minutes: Int) {
+    /** Switches the unit off [minutes] from now. */
+    suspend fun setOffTimer(airconId: String, minutes: Int) {
         require(minutes in 1..MAX_TIMER_MINUTES) { "minutes must be between 1 and $MAX_TIMER_MINUTES" }
-        val timer = OffTimer(at = now() + minutes * 60_000L)
-        store.updateUnit(airconId) { it.copy(timer = timer) }
-        timers.schedule(airconId, timer.dueAt)
+        setTimer(airconId, TimerAction.OFF, now() + minutes * 60_000L)
     }
 
-    suspend fun cancelTimer(airconId: String) {
-        if (store.unit(airconId)?.timer == null) return
-        timers.cancel(airconId)
-        store.updateUnit(airconId) { it.copy(timer = null) }
+    /** Switches the unit on the next time the clock reads [hour]:[minute]. */
+    suspend fun setOnTimer(airconId: String, hour: Int, minute: Int) {
+        require(hour in 0..23 && minute in 0..59) { "not a time of day: $hour:$minute" }
+        setTimer(airconId, TimerAction.ON, nextOccurrence(now(), hour, minute, ZoneId.of(timezone())))
+    }
+
+    /** Sets the unit's [action] timer, replacing the one it had. */
+    private suspend fun setTimer(airconId: String, action: TimerAction, at: Long) {
+        val timer = UnitTimer(at)
+        store.updateUnit(airconId) { it.copy(timers = it.timers + (action to timer)) }
+        timers.schedule(airconId, action, timer.dueAt)
+    }
+
+    suspend fun cancelTimer(airconId: String, action: TimerAction) {
+        if (store.unit(airconId)?.timers?.get(action) == null) return
+        timers.cancel(airconId, action)
+        store.updateUnit(airconId) { it.copy(timers = it.timers - action) }
     }
 
     sealed interface TimerOutcome {
-        data object SwitchedOff : TimerOutcome
+        data object Switched : TimerOutcome
         data object NotDue : TimerOutcome
         data class Retrying(val attempt: Int) : TimerOutcome
         data class GaveUp(val error: Exception) : TimerOutcome
     }
 
     /**
-     * Called when a unit's alarm goes off. Switches it off, or records the failure and schedules
-     * a retry (see [timerRetryDelayMs]): the unit may be out of reach for a while, or another
-     * client may hold its 60-second write lock, which is then waited out. The attempt count
-     * lives in the stored [OffTimer], so it survives the process and [rescheduleAll]; a retry
-     * that would come later than [TIMER_GIVE_UP_MS] after the switch-off time is not made, and
-     * the timer is given up.
+     * Called when a unit's alarm for [action] goes off. Writes the power, or records the failure
+     * and schedules a retry (see [timerRetryDelayMs]): the unit may be out of reach for a while,
+     * or another client may hold its 60-second write lock, which is then waited out. The attempt
+     * count lives in the stored [UnitTimer], so it survives the process and [rescheduleAll]; a
+     * retry that would come later than [TIMER_GIVE_UP_MS] after the timer's time is not made,
+     * and the timer is given up.
      *
      * An alarm can go off more than once for the same attempt (see [rescheduleAll]), so firings
      * for one unit take turns, and each one works from the stored timer as it finds it.
      */
-    suspend fun fireTimer(airconId: String): TimerOutcome = firing.computeIfAbsent(airconId) { Mutex() }.withLock {
-        val timer = store.unit(airconId)?.timer ?: return@withLock TimerOutcome.NotDue
+    suspend fun fireTimer(airconId: String, action: TimerAction): TimerOutcome = firing.computeIfAbsent(airconId) { Mutex() }.withLock {
+        val timer = store.unit(airconId)?.timers?.get(action) ?: return@withLock TimerOutcome.NotDue
         if (timer.dueAt > now() + 1000) {
-            timers.schedule(airconId, timer.dueAt) // Rescheduled since this alarm was set.
+            timers.schedule(airconId, action, timer.dueAt) // Rescheduled since this alarm was set.
             return@withLock TimerOutcome.NotDue
         }
+
+        // Replaces the timer by [next], unless the user cancelled or replaced it meanwhile:
+        // theirs is left alone. Returns whether it was still this one.
+        suspend fun settle(next: UnitTimer?): Boolean {
+            var same = false
+            store.updateUnit(airconId) { u ->
+                if (u.timers[action] != timer) return@updateUnit u
+                same = true
+                u.copy(timers = if (next == null) u.timers - action else u.timers + (action to next))
+            }
+            return same
+        }
+
         try {
             // Runs inside a broadcast receiver, which Android gives about a minute. An
             // unreachable unit costs a timeout per transport plus a rescan, so bound the attempt.
-            // Switching off clears the timer (see apply).
-            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId, waitUpToS = 0) { it.copy(power = false) } }
-            TimerOutcome.SwitchedOff
+            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId, waitUpToS = 0) { it.copy(power = action.power) } }
+            settle(null)
+            TimerOutcome.Switched
         } catch (e: Exception) {
             val failed = timer.failedAttempts + 1
             val lockLapsesIn = (e as? WfRacException)?.retryAfterS?.let { (it + 2) * 1000L } ?: 0L
             val retryAt = now() + maxOf(timerRetryDelayMs(failed), lockLapsesIn)
             val next = if (retryAt <= timer.at + TIMER_GIVE_UP_MS) timer.copy(failedAttempts = failed, retryAt = retryAt) else null
-            // The user may have cancelled or replaced the timer meanwhile; leave theirs alone.
-            var replaced = false
-            store.updateUnit(airconId) { u ->
-                if (u.timer != timer) return@updateUnit u
-                replaced = true
-                u.copy(timer = next)
-            }
             when {
-                !replaced -> TimerOutcome.NotDue
+                !settle(next) -> TimerOutcome.NotDue
                 next != null -> {
-                    timers.schedule(airconId, next.dueAt)
+                    timers.schedule(airconId, action, next.dueAt)
                     TimerOutcome.Retrying(failed)
                 }
                 else -> {
-                    timers.cancel(airconId)
+                    timers.cancel(airconId, action)
                     TimerOutcome.GaveUp(e)
                 }
             }
@@ -437,13 +448,13 @@ class Repository(
     }
 
     /**
-     * Sets every unit's alarm from its stored timer. Android drops alarms on a reboot, an update
-     * and, without telling the app, when the user revokes the exact-alarm permission; so this
-     * runs whenever the process starts. Overdue ones fire right away; a pending retry keeps its
-     * attempt count.
+     * Sets every unit's alarms from its stored timers. Android drops alarms on a reboot, an
+     * update and, without telling the app, when the user revokes the exact-alarm permission; so
+     * this runs whenever the process starts. Overdue ones fire right away; a pending retry keeps
+     * its attempt count.
      */
     fun rescheduleAll() {
-        for (u in store.state.value.units) u.timer?.let { timers.schedule(u.airconId, it.dueAt) }
+        for (u in store.state.value.units) for ((action, t) in u.timers) timers.schedule(u.airconId, action, t.dueAt)
     }
 
     companion object {
@@ -451,13 +462,12 @@ class Repository(
         const val TIMER_ATTEMPT_TIMEOUT_MS = 40_000L
 
         /**
-         * How long after the switch-off time the timer keeps trying. The module drops off Wi-Fi
-         * about once an hour and sometimes stays away for up to an hour after that; roaming
-         * between access points can cost 15-35 minutes. Same rule as the server (timer-policy.js).
+         * How long after its time a timer keeps trying. The module drops off Wi-Fi about once an
+         * hour and sometimes stays away for up to an hour after that; roaming between access
+         * points can cost 15-35 minutes. Same rule as the server (timers.js).
          */
         const val TIMER_GIVE_UP_MS = 75 * 60_000L
 
-        /** The wait before the next attempt after [failed] failed attempts (1, 2, ...): 30 s, 1, 2, 4, then 5 min. */
         /** [units] with [airconId] moved [by] places, clamped to the ends; unchanged if it is not there. */
         fun moved(units: List<StoredUnit>, airconId: String, by: Int): List<StoredUnit> {
             val from = units.indexOfFirst { it.airconId == airconId }
@@ -467,6 +477,7 @@ class Repository(
             return units.toMutableList().apply { add(to, removeAt(from)) }
         }
 
+        /** The wait before the next attempt after [failed] failed attempts (1, 2, ...): 30 s, 1, 2, 4, then 5 min. */
         fun timerRetryDelayMs(failed: Int): Long = minOf(5 * 60_000L, 30_000L shl (failed - 1).coerceIn(0, 4))
 
         /** A user's write waits this long for another client's write lock to lapse. */

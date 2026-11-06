@@ -26,6 +26,7 @@
     <string name="share_diagnostics">Share diagnostics</string>
     <string name="diagnostics_subject">AirLAN diagnostics</string>
     <string name="auto_off">Auto off</string>
+    <string name="auto_on">Auto on</string>
     <string name="airflow">Airflow</string>
     <string name="fan_speed">Fan speed</string>
     <!-- Auto, then the four steps from quiet to high, as the remote names them. -->
@@ -64,6 +65,10 @@
     <string name="auto_3d">3D auto</string>
     <string name="off_at">Switches off at %1$s</string>
     <string name="cancel">Cancel</string>
+    <string name="on_at">Switches on at %1$s</string>
+    <string name="pick_time">Pick a time</string>
+    <string name="set_timer">Set</string>
+    <string name="on_timer_hint">Phone must be on home Wi-Fi.</string>
     <string name="turn_on_for_timer">Turn the unit on to pick a switch-off time.</string>
     <string name="remaining_hours">%1$d h %2$d min left</string>
     <string name="remaining_whole_hours">%1$d h left</string>
@@ -106,12 +111,13 @@
     <string name="permission_allow">Allow</string>
     <string name="permission_settings">Open settings</string>
     <string name="permission_denied">Without this permission AirLAN cannot reach your air conditioners. You can allow it under Permissions → Nearby devices.</string>
-    <string name="exact_alarm_title">Switch off on time</string>
-    <string name="exact_alarm_text">To switch your air conditioner off at the exact time, AirLAN needs permission to set alarms. Without it, Android may switch it off a few minutes late.</string>
+    <string name="exact_alarm_title">Timers on time</string>
+    <string name="exact_alarm_text">To switch your air conditioner on or off at the exact time, AirLAN needs permission to set alarms. Without it, Android may switch it a few minutes late.</string>
     <string name="exact_alarm_allow">Allow</string>
     <string name="exact_alarm_skip">Not now</string>
-    <string name="channel_timer">Switch-off timer</string>
+    <string name="channel_timer">Timers</string>
     <string name="timer_failed_title">Could not switch off %1$s</string>
+    <string name="timer_failed_on_title">Could not switch on %1$s</string>
     <string name="timer_failed_text">The timer went off, but the air conditioner stayed out of reach for over an hour. Is your phone on your home Wi-Fi?</string>
     <string name="error_unreachable">The unit is not reachable on the network.</string>
     <string name="error_unit_refused">The unit refused the command. Try again in a minute.</string>

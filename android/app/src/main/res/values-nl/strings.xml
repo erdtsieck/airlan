@@ -25,6 +25,7 @@
     <string name="share_diagnostics">Diagnose delen</string>
     <string name="diagnostics_subject">AirLAN diagnose</string>
     <string name="auto_off">Automatisch uit</string>
+    <string name="auto_on">Automatisch aan</string>
     <string name="airflow">Luchtstroom</string>
     <string name="fan_speed">Ventilator</string>
     <string-array name="fan_speeds">
@@ -57,6 +58,10 @@
     <string name="auto_3d">3D auto</string>
     <string name="off_at">Gaat uit om %1$s</string>
     <string name="cancel">Annuleren</string>
+    <string name="on_at">Gaat aan om %1$s</string>
+    <string name="pick_time">Tijd kiezen</string>
+    <string name="set_timer">Instellen</string>
+    <string name="on_timer_hint">Telefoon moet thuis op wifi zijn.</string>
     <string name="turn_on_for_timer">Zet de airco aan om een uitschakeltijd te kiezen.</string>
     <string name="remaining_hours">nog %1$d u %2$d min</string>
     <string name="remaining_whole_hours">nog %1$d u</string>
@@ -98,12 +103,13 @@
     <string name="permission_allow">Toestaan</string>
     <string name="permission_settings">Instellingen openen</string>
     <string name="permission_denied">Zonder deze toestemming kan AirLAN je airco’s niet bereiken. Je kunt het toestaan onder Rechten → Apparaten in de buurt.</string>
-    <string name="exact_alarm_title">Op tijd uitschakelen</string>
-    <string name="exact_alarm_text">Om je airco precies op tijd uit te zetten, heeft AirLAN toestemming nodig om wekkers te zetten. Zonder die toestemming kan Android hem een paar minuten later uitzetten.</string>
+    <string name="exact_alarm_title">Op tijd schakelen</string>
+    <string name="exact_alarm_text">Om je airco precies op tijd aan of uit te zetten, heeft AirLAN toestemming nodig om wekkers te zetten. Zonder die toestemming kan Android hem een paar minuten te laat schakelen.</string>
     <string name="exact_alarm_allow">Toestaan</string>
     <string name="exact_alarm_skip">Niet nu</string>
-    <string name="channel_timer">Uitschakeltimer</string>
+    <string name="channel_timer">Timers</string>
     <string name="timer_failed_title">%1$s kon niet uit</string>
+    <string name="timer_failed_on_title">%1$s kon niet aan</string>
     <string name="timer_failed_text">De timer ging af, maar de airco bleef ruim een uur onbereikbaar. Is je telefoon verbonden met je thuiswifi?</string>
     <string name="error_unreachable">De airco is niet bereikbaar op het netwerk.</string>
     <string name="error_unit_refused">De airco weigerde de opdracht. Probeer het over een minuut opnieuw.</string>

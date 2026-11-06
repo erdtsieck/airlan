@@ -17,7 +17,7 @@
         android:maxSdkVersion="36"
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="33" />
-    <!-- The switch-off timer: an alarm that fires on time, survives a reboot, and reports failure. -->
+    <!-- The on and off timers: alarms that fire on time, survive a reboot, and report failure. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -42,7 +42,7 @@
         </activity>
 
         <receiver
-            android:name=".timer.OffTimerReceiver"
+            android:name=".timer.TimerReceiver"
             android:exported="false" />
 
         <receiver

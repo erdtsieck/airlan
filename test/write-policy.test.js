@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WfRacClient, WfRacError, AIRLAN_OPERATOR_ID } from '../wfrac.js';
 import { startFakeUnit } from '../tools/fake-unit.mjs';
-import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from '../timer-policy.js';
+import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from '../timers.js';
 
 const ID = 'fa4e00000001';
 

@@ -6,7 +6,7 @@ We take Pull Requests!
 
 1. Open a [GitHub issue](https://github.com/erdtsieck/airlan/issues/new) first and describe the
    problem and the change you have in mind. AirLAN deliberately does little (on/off,
-   cool/heat, temperature, switch-off timer), so a new feature needs a short discussion
+   cool/heat, temperature, on and off timers), so a new feature needs a short discussion
    before code.
 2. Once the maintainer agrees on the approach, start on your change.
 3. Cover your change with automated tests and keep breaking changes to a bare minimum.

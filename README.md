@@ -59,14 +59,15 @@ number.
 ## Android app
 
 The app finds the units on your Wi-Fi network, asks you to name them, and runs the
-switch-off timer as an alarm on the phone: it fires with the app closed, survives a
-restart, keeps trying for 75 minutes if the unit cannot be reached (see *Limitations*) and
-then notifies you. The
-phone has to be on the home network when the timer fires.
+timers as alarms on the phone: switch off after a set time, and switch on at a time of
+day (with the unit's last mode, temperature and airflow). A timer fires with the app
+closed, survives a restart, keeps trying for 75 minutes if the unit cannot be reached (see
+*Limitations*) and then notifies you. The phone has to be on the home network when the
+timer fires.
 
 No air conditioner at hand? *Try a demo unit* (on the *Manage units* screen) adds a
 simulated unit, marked *Demo*, that works like a real one: power, the modes,
-temperature, and the switch-off timer as a real alarm. It reports an indoor temperature
+temperature, and the timers as real alarms. It reports an indoor temperature
 that moves towards the set temperature while it runs. Its state is kept in memory only and
 starts afresh (off, cooling, 21 °C) whenever the app's process starts; the unit itself stays
 until you forget it. Network scans never find or touch it.
@@ -94,8 +95,8 @@ Publishing on Google Play is described in [docs/play-store](docs/play-store).
 ### Requirements
 
 - Node.js 22 or newer. No other dependencies.
-- A machine on the same network as the air conditioners that stays on: the switch-off
-  timer runs in the server, so it only fires while the server is running. A Raspberry Pi,
+- A machine on the same network as the air conditioners that stays on: the timers run
+  in the server, so they only fire while the server is running. A Raspberry Pi,
   NAS or always-on PC works well.
 - The units must already be connected to Wi-Fi (for example with the Smart M-Air app).
   AirLAN does not do the initial Wi-Fi setup.
@@ -156,10 +157,11 @@ branch, versions and transport in one report (the server has
   of the Mitsubishi WF-RAC Home Assistant integration.
 - `mdns.js`: just enough multicast DNS to find the units by name.
 - `discovery.js`: which addresses to probe, and the port probe.
-- `timer-policy.js`: when the switch-off timer tries again, and when it gives up.
+- `timers.js`: the on and off timers: when they fire, when they try again, and when they
+  give up.
 - `server.js`: HTTP server and API. It discovers units, follows them when DHCP gives them
   a new address (asking mDNS first), registers AirLAN's account with each unit and runs the
-  switch-off timers.
+  timers.
 - `public/`: the web app.
 - `data/state.json`: unit names, addresses, timers and this installation's `deviceId`.
   Timers survive a restart; a timer that expired while the server was down fires at
@@ -169,14 +171,16 @@ branch, versions and transport in one report (the server has
 
 | Request | Effect |
 |---|---|
-| `GET /api/units` | All units with their current state; `name` is `null` until the user names it |
+| `GET /api/units` | All units with their current state; `name` is `null` until the user names it. `timers` holds the time (epoch ms) of the pending `on` and `off` timer, or `null`; `timerFailed` (`{ action, at }`) is the last timer that gave up |
 | `POST /api/units` | Body `{ "host": "192.168.1.50" }`: add the unit at that address |
 | `PATCH /api/units/:id` | Body with any of `power` (bool), `mode` (`cool`, `heat`, `auto`, `fan`, `dry`), `presetTemp`, `fanSpeed` (`"auto"` or 1–4: quiet, low, medium, high), `vane` (up/down direction: `"swing"` or 1–4, highest to lowest), `vaneLR` (left/right direction: `"swing"`, 1–5 from left to right, 6 wide, 7 narrow), `"3d"` as `vane` and/or `vaneLR` for 3D auto, `name`. `vaneLR` is `null`, and `vaneLR` and `"3d"` are refused, for a unit that does not report its left/right vane (see below) |
 | `PUT /api/units/order` | Body `{ "order": ["<airconId>", …] }`: the order of the units; units left out keep theirs after the named ones |
 | `DELETE /api/units/:id` | Forget the unit |
 | `GET /api/units/:id/diagnostics` | A plain-text report for a bug report: firmware, transport and the last requests with their result codes. Addresses keep only their last number, the MAC its last four digits; no names |
-| `PUT /api/units/:id/timer` | Body `{ "minutes": 1–360 }`: switch off after that time |
-| `DELETE /api/units/:id/timer` | Cancel the timer |
+| `PUT /api/units/:id/timers/off` | Body `{ "minutes": 1–360 }`: switch off after that time |
+| `PUT /api/units/:id/timers/on` | Body `{ "time": "07:00" }`: switch on, with the last settings, the next time the server's clock reads that time |
+| `DELETE /api/units/:id/timers/on`, `…/timers/off` | Cancel that timer |
+| `PUT`/`DELETE /api/units/:id/timer` | The older name of `/timers/off` |
 | `POST /api/scan` | Scan the network for units again |
 
 Errors come back as `{ "error": { "code", "message" } }` with `code` one of
@@ -202,11 +206,11 @@ Errors come back as `{ "error": { "code", "message" } }` with `code` one of
   someone just used Smart M-Air or a voice assistant, AirLAN may be refused briefly
   briefly. AirLAN reads when the lock lapses (`expires` in the unit's status): a lock that
   lapses within 20 seconds is waited out, otherwise the app says how long it still runs
-  (`unit_busy`). The timer waits it out by itself.
+  (`unit_busy`). A timer waits it out by itself.
 - **Hourly dropouts.** The module drops off Wi-Fi about once an hour, a reset commanded by the
   air conditioner itself. Usually it is back within a minute, but sometimes it does not
   accept connections again until the next hour; roaming between access points or bands can
-  cost 15–35 minutes as well. The switch-off timer therefore keeps trying for 75 minutes,
+  cost 15–35 minutes as well. The timers therefore keep trying for 75 minutes,
   quickly at first and then every 5 minutes. A dedicated 2.4 GHz network for the units, with
   802.11r and 802.11v off, makes them more reliable.
 - **Heating overshoots on purpose.** In heating mode the unit aims for the set temperature

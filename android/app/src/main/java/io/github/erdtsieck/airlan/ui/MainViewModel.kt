@@ -10,6 +10,7 @@ import io.github.erdtsieck.airlan.R
 import io.github.erdtsieck.airlan.data.LocalNetworkNotAllowedException
 import io.github.erdtsieck.airlan.data.NoUnitAtAddressException
 import io.github.erdtsieck.airlan.data.StoredUnit
+import io.github.erdtsieck.airlan.data.TimerAction
 import io.github.erdtsieck.airlan.discovery.Discovery
 import io.github.erdtsieck.airlan.repository
 import io.github.erdtsieck.airlan.wfrac.AirconState
@@ -238,17 +239,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setTimer(minutes: Int) = viewModelScope.launch {
+    fun setOffTimer(minutes: Int) = timer { repo.setOffTimer(it, minutes) }
+
+    fun setOnTimer(hour: Int, minute: Int) = timer { repo.setOnTimer(it, hour, minute) }
+
+    fun cancelTimer(action: TimerAction) = timer { repo.cancelTimer(it, action) }
+
+    private fun timer(block: suspend (airconId: String) -> Unit) = viewModelScope.launch {
         val id = state.value.selected?.stored?.airconId ?: return@launch
         try {
-            repo.setTimer(id, minutes)
+            block(id)
         } catch (e: Exception) {
             fail(e)
         }
-    }
-
-    fun cancelTimer() = viewModelScope.launch {
-        state.value.selected?.stored?.airconId?.let { repo.cancelTimer(it) }
     }
 
     private fun fail(e: Exception) {

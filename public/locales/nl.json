@@ -49,6 +49,10 @@
   "spread": "Spreiding",
   "autoOff": "Automatisch uit",
   "offAt": "Gaat uit om {time}",
+  "autoOn": "Automatisch aan",
+  "onAt": "Gaat aan om {time}",
+  "setTimer": "Instellen",
+  "onHint": "Gaat aan met de laatste stand.",
   "cancel": "Annuleren",
   "turnOnForTimer": "Zet de airco aan om een uitschakeltijd te kiezen.",
   "remainingHours": "nog {h} u {m} min",
@@ -86,5 +90,6 @@
   "error.no_unit_at_address": "Op dat adres antwoordt geen airco.",
   "error.unit_busy": "Een andere app of spraakassistent bediende deze airco net, en die heeft hem dan een minuut voor zich alleen. Over {s} s weer vrij.",
   "error.no_account_slot": "Deze airco accepteert hooguit vier apps of telefoons, en alle vier de plekken zijn bezet. Verwijder de airco uit een app die je niet meer gebruikt, of vergeet hem in AirLAN op een oude telefoon, en probeer het opnieuw.",
-  "timerFailed": "Kon niet uitzetten om {time}: de airco bleef ruim een uur onbereikbaar."
+  "timerFailed": "Kon niet uitzetten om {time}: de airco bleef ruim een uur onbereikbaar.",
+  "timerFailedOn": "Kon niet aanzetten om {time}: de airco bleef ruim een uur onbereikbaar."
 }

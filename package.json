@@ -1,6 +1,6 @@
 {
   "name": "airlan",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Local control for Mitsubishi Heavy Industries air conditioners with the WF-RAC Wi-Fi module. No cloud.",
   "type": "module",
   "license": "MIT",

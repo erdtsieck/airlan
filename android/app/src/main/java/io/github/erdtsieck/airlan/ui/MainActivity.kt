@@ -82,24 +82,30 @@ private fun App(vm: MainViewModel) {
         }
     }
 
-    var exactAlarmAsk by remember { mutableStateOf<Int?>(null) }
+    // A timer the user picked, held while they are asked for the exact-alarm permission.
+    var exactAlarmAsk by remember { mutableStateOf<(() -> Unit)?>(null) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
-    fun startTimer(minutes: Int) {
+    fun startTimer(set: () -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            // Only used to say so when a timer could not switch a unit off.
+            // Only used to say so when a timer could not switch a unit.
             notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        vm.setTimer(minutes)
+        set()
     }
 
-    exactAlarmAsk?.let { minutes ->
+    /** Every timer goes through here: ask for exact alarms first if they are not allowed. */
+    fun requestTimer(set: () -> Unit) {
+        if (AlarmTimerScheduler.canScheduleExact(context)) startTimer(set) else exactAlarmAsk = set
+    }
+
+    exactAlarmAsk?.let { set ->
         ExactAlarmDialog(
             onAllow = {
                 exactAlarmAsk = null
-                startTimer(minutes)
+                startTimer(set)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     context.startActivity(
                         Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", context.packageName, null)),
@@ -108,7 +114,7 @@ private fun App(vm: MainViewModel) {
             },
             onSkip = {
                 exactAlarmAsk = null
-                startTimer(minutes)
+                startTimer(set)
             },
         )
     }
@@ -147,9 +153,8 @@ private fun App(vm: MainViewModel) {
             onVaneLR = vm::setVaneLR,
             onAuto3d = vm::setAuto3d,
             onNudge = vm::nudgeTemp,
-            onTimer = { minutes ->
-                if (AlarmTimerScheduler.canScheduleExact(context)) startTimer(minutes) else exactAlarmAsk = minutes
-            },
+            onOffTimer = { minutes -> requestTimer { vm.setOffTimer(minutes) } },
+            onOnTimer = { hour, minute -> requestTimer { vm.setOnTimer(hour, minute) } },
             onCancelTimer = vm::cancelTimer,
             onRename = vm::rename,
         )

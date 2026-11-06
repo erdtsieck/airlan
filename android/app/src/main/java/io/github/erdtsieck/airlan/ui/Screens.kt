@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
@@ -33,11 +34,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.TimePickerDialog
+import androidx.compose.material3.TimePickerDialogDefaults
+import androidx.compose.material3.TimePickerDisplayMode
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,6 +86,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.erdtsieck.airlan.R
+import io.github.erdtsieck.airlan.data.TimerAction
+import io.github.erdtsieck.airlan.data.UnitTimer
 import io.github.erdtsieck.airlan.data.aimsBothVanes
 import io.github.erdtsieck.airlan.data.macLabel
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MAX
@@ -269,14 +279,13 @@ private fun DemoBadge() {
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         modifier = Modifier
-            .padding(start = 8.dp)
             .border(1.dp, c.line, RoundedCornerShape(50))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }
 
 @Composable
-private fun Hint(text: String) = Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp)
+private fun Hint(text: String, modifier: Modifier = Modifier) = Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, modifier = modifier)
 
 @Composable
 internal fun Heading(text: String) =
@@ -297,8 +306,9 @@ fun UnitScreen(
     onVaneLR: (Int) -> Unit,
     onAuto3d: () -> Unit,
     onNudge: (Double) -> Unit,
-    onTimer: (Int) -> Unit,
-    onCancelTimer: () -> Unit,
+    onOffTimer: (minutes: Int) -> Unit,
+    onOnTimer: (hour: Int, minute: Int) -> Unit,
+    onCancelTimer: (TimerAction) -> Unit,
     onRename: (String, String) -> Unit,
 ) = Page {
     val c = LocalAirColors.current
@@ -349,16 +359,26 @@ fun UnitScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(displayName(state, unit), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    if (unit.stored.demo) DemoBadge()
-                    Icon(
-                        AirIcons.edit,
-                        stringResource(R.string.rename),
-                        tint = c.muted,
-                        modifier = Modifier.padding(start = 4.dp).size(28.dp).clip(CircleShape).clickable { renaming = true }.padding(6.dp),
-                    )
+                    // The name comes first and in full: what does not fit beside it (the Demo badge,
+                    // the pencil) moves to the next line instead of squeezing the name to "W…".
+                    FlowRow(
+                        Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(displayName(state, unit), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (unit.stored.demo) DemoBadge()
+                            Icon(
+                                AirIcons.edit,
+                                stringResource(R.string.rename),
+                                tint = c.muted,
+                                modifier = Modifier.padding(start = if (unit.stored.demo) 4.dp else 0.dp).size(28.dp).clip(CircleShape).clickable { renaming = true }.padding(6.dp),
+                            )
+                        }
+                    }
                     if (single) {
-                        Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.width(8.dp))
                         RoundButton(AirIcons.gear, stringResource(R.string.manage), onManage, 36.dp, enabled = true)
                         Spacer(Modifier.width(8.dp))
                     }
@@ -414,42 +434,14 @@ fun UnitScreen(
         ModeSelector(s, enabled = !disabled, onMode, Modifier.padding(top = 14.dp))
     }
 
-    Card {
-        Heading(stringResource(R.string.auto_off))
-        val offAt = unit.stored.timer?.at
-        when {
-            offAt != null -> {
-                var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-                LaunchedEffect(offAt) {
-                    while (true) {
-                        now = System.currentTimeMillis()
-                        delay(15_000)
-                    }
-                }
-                val minutes = ((offAt - now + 59_999) / 60_000).coerceAtLeast(0).toInt()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.off_at, DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(offAt))), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = c.text)
-                        Hint(
-                            when {
-                                minutes >= 60 && minutes % 60 == 0 -> stringResource(R.string.remaining_whole_hours, minutes / 60)
-                                minutes >= 60 -> stringResource(R.string.remaining_hours, minutes / 60, minutes % 60)
-                                else -> stringResource(R.string.remaining_minutes, minutes)
-                            },
-                        )
-                    }
-                    Pill(stringResource(R.string.cancel), onCancelTimer)
-                }
-            }
-            s?.power == true -> {
-                val labels = TIMER_MINUTES.map { m -> if (m < 60) stringResource(R.string.minutes_short, m) else stringResource(R.string.hours_short, m / 60) }
-                FittingGrid(labels, maxColumns = 4, chrome = CHIP_PADDING * 2 + 2.dp) { i, modifier ->
-                    Pill(labels[i], { onTimer(TIMER_MINUTES[i]) }, modifier, enabled = !disabled, horizontalPadding = CHIP_PADDING, verticalPadding = 9.dp)
-                }
-            }
-            else -> Hint(stringResource(R.string.turn_on_for_timer))
-        }
-    }
+    TimersCard(
+        timers = unit.stored.timers,
+        power = s?.power == true,
+        enabled = !disabled,
+        onOffTimer = onOffTimer,
+        onOnTimer = onOnTimer,
+        onCancel = onCancelTimer,
+    )
 
     AirflowCard(s, unit.stored.aimsBothVanes, enabled = !disabled, onFanSpeed, onVane, onVaneLR, onAuto3d)
 
@@ -460,6 +452,147 @@ fun UnitScreen(
             renaming = false
             onRename(unit.stored.airconId, it)
         }
+    }
+}
+
+/**
+ * Auto off and auto on in one card, each under its own heading. The off-timer counts down
+ * from now (chips), so it is offered while the unit runs; the on-timer is for a time of day
+ * (a clock), and can be set at any time, also while the unit runs, for the next morning.
+ */
+@Composable
+private fun TimersCard(
+    timers: Map<TimerAction, UnitTimer>,
+    power: Boolean,
+    enabled: Boolean,
+    onOffTimer: (Int) -> Unit,
+    onOnTimer: (Int, Int) -> Unit,
+    onCancel: (TimerAction) -> Unit,
+) = Card {
+    val c = LocalAirColors.current
+    Heading(stringResource(R.string.auto_off))
+    val off = timers[TimerAction.OFF]
+    when {
+        off != null -> PendingTimer(stringResource(R.string.off_at, clockTime(off.at)), off.at) { onCancel(TimerAction.OFF) }
+        power -> {
+            val labels = TIMER_MINUTES.map { m -> if (m < 60) stringResource(R.string.minutes_short, m) else stringResource(R.string.hours_short, m / 60) }
+            FittingGrid(labels, maxColumns = 4, chrome = CHIP_PADDING * 2 + 2.dp) { i, modifier ->
+                Pill(labels[i], { onOffTimer(TIMER_MINUTES[i]) }, modifier, enabled = enabled, horizontalPadding = CHIP_PADDING, verticalPadding = 9.dp)
+            }
+        }
+        else -> Hint(stringResource(R.string.turn_on_for_timer))
+    }
+
+    Box(Modifier.padding(vertical = 14.dp).fillMaxWidth().height(1.dp).background(c.line))
+
+    Heading(stringResource(R.string.auto_on))
+    val on = timers[TimerAction.ON]
+    var picking by remember { mutableStateOf(false) }
+    if (on != null) {
+        PendingTimer(stringResource(R.string.on_at, clockTime(on.at)), on.at) { onCancel(TimerAction.ON) }
+    } else {
+        HintBesideButton(stringResource(R.string.on_timer_hint), stringResource(R.string.pick_time)) { picking = true }
+    }
+    if (picking) {
+        OnTimeDialog(
+            onDismiss = { picking = false },
+            onSet = { hour, minute ->
+                picking = false
+                onOnTimer(hour, minute)
+            },
+        )
+    }
+}
+
+/**
+ * A hint with a button to its right, as long as the hint then needs at most two lines;
+ * otherwise (a large font, a narrow screen, a long translation) the button goes under it, so
+ * the hint does not become a narrow column of short lines.
+ */
+@Composable
+private fun HintBesideButton(hint: String, label: String, onClick: () -> Unit) {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val hintStyle = LocalTextStyle.current.copy(fontSize = 14.sp)
+    val labelStyle = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val gap = 12.dp
+        // The lines the hint really breaks into beside the button, not an estimate from its width.
+        val hintLines = with(density) {
+            // The Pill's padding and border, and a little slack for rounding.
+            val button = measurer.measure(label, labelStyle, maxLines = 1).size.width.toDp() + 14.dp * 2 + 4.dp
+            val room = (maxWidth - button - gap).coerceAtLeast(0.dp).roundToPx()
+            measurer.measure(hint, hintStyle, constraints = Constraints(maxWidth = room)).lineCount
+        }
+        if (hintLines <= 2) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Hint(hint, Modifier.weight(1f))
+                Spacer(Modifier.width(gap))
+                Pill(label, onClick)
+            }
+        } else {
+            Column {
+                Hint(hint)
+                Pill(label, onClick, Modifier.padding(top = 10.dp))
+            }
+        }
+    }
+}
+
+private fun clockTime(at: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(at))
+
+/** A timer that is set: when it goes off, how long from now, and a way to cancel it. */
+@Composable
+private fun PendingTimer(text: String, at: Long, onCancel: () -> Unit) {
+    val c = LocalAirColors.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(at) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(15_000)
+        }
+    }
+    val minutes = ((at - now + 59_999) / 60_000).coerceAtLeast(0).toInt()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(text, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = c.text)
+            Hint(
+                when {
+                    minutes >= 60 && minutes % 60 == 0 -> stringResource(R.string.remaining_whole_hours, minutes / 60)
+                    minutes >= 60 -> stringResource(R.string.remaining_hours, minutes / 60, minutes % 60)
+                    else -> stringResource(R.string.remaining_minutes, minutes)
+                },
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Pill(stringResource(R.string.cancel), onCancel)
+    }
+}
+
+/**
+ * The clock for the on-timer, or the keyboard entry it can switch to. Only the picker goes
+ * in the content: the dialog sizes itself to it. What the timer needs is said on the card.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OnTimeDialog(onDismiss: () -> Unit, onSet: (hour: Int, minute: Int) -> Unit) {
+    val state = rememberTimePickerState(initialHour = 7, initialMinute = 0)
+    var mode by remember { mutableStateOf(TimePickerDisplayMode.Picker) }
+    TimePickerDialog(
+        onDismissRequest = onDismiss,
+        title = { TimePickerDialogDefaults.Title(displayMode = mode) },
+        modeToggleButton = {
+            TimePickerDialogDefaults.DisplayModeToggle(
+                onDisplayModeChange = {
+                    mode = if (mode == TimePickerDisplayMode.Picker) TimePickerDisplayMode.Input else TimePickerDisplayMode.Picker
+                },
+                displayMode = mode,
+            )
+        },
+        confirmButton = { TextButton({ onSet(state.hour, state.minute) }) { Text(stringResource(R.string.set_timer)) } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } },
+    ) {
+        if (mode == TimePickerDisplayMode.Picker) TimePicker(state) else TimeInput(state)
     }
 }
 

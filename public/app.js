@@ -147,12 +147,12 @@ async function change(body, label, u = unit()) {
   }
 }
 
-async function timer(minutes) {
+/** Sets the unit's `action` timer ('on' with `{ time }`, 'off' with `{ minutes }`), or cancels it without `body`. */
+async function timer(action, body) {
   const u = unit();
   try {
-    const next = minutes
-      ? await api('PUT', `/api/units/${u.airconId}/timer`, { minutes })
-      : await api('DELETE', `/api/units/${u.airconId}/timer`);
+    const path = `/api/units/${u.airconId}/timers/${action}`;
+    const next = body ? await api('PUT', path, body) : await api('DELETE', path);
     Object.assign(u, next);
     render();
   } catch (e) {
@@ -203,8 +203,8 @@ function rename(u = unit()) {
   if (name && name.trim() && name.trim() !== u.name) change({ name: name.trim() }, t('saving'), u);
 }
 
-function remaining(offAt) {
-  const min = Math.max(0, Math.ceil((offAt - Date.now()) / 60000));
+function remaining(at) {
+  const min = Math.max(0, Math.ceil((at - Date.now()) / 60000));
   const h = Math.floor(min / 60);
   if (!h) return t('remainingMinutes', { m: min });
   return min % 60 ? t('remainingHours', { h, m: min % 60 }) : t('remainingWholeHours', { h });
@@ -365,8 +365,16 @@ function render() {
       ].filter(Boolean).join(' · ')
     : t('unreachable');
   const clock = (ms) => new Date(ms).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
-  const offAtTime = u.offAt && clock(u.offAt);
-  const timerFailed = !u.offAt && u.timerFailedAt ? `<p class="hint error">${t('timerFailed', { time: clock(u.timerFailedAt) })}</p>` : '';
+  const failed = u.timerFailed;
+  const timerFailed = failed && !u.timers[failed.action]
+    ? `<p class="hint error">${failed.action === 'on' ? t('timerFailedOn', { time: clock(failed.at) }) : t('timerFailed', { time: clock(failed.at) })}</p>`
+    : '';
+  // A pending timer: when, how long from now, and a way to cancel it.
+  const pending = (action, at, text) => `
+        <div class="timer-active">
+          <div><b>${text}</b><div class="left">${remaining(at)}</div></div>
+          <button class="cancel" data-cancel="${action}">${t('cancel')}</button>
+        </div>`;
 
   const naming = u.name ? '' : `
     <section class="card naming">
@@ -404,16 +412,19 @@ function render() {
     </section>
 
 
-    <section class="card">
-      <h2>${t('autoOff')}</h2>
+    <section class="card timers">
       ${timerFailed}
-      ${u.offAt ? `
-        <div class="timer-active">
-          <div><b>${t('offAt', { time: offAtTime })}</b><div class="left">${remaining(u.offAt)}</div></div>
-          <button class="cancel" id="cancel">${t('cancel')}</button>
-        </div>` : u.power ? `
+      <h2>${t('autoOff')}</h2>
+      ${u.timers.off ? pending('off', u.timers.off, t('offAt', { time: clock(u.timers.off) })) : u.power ? `
         <div class="chips">${TIMER_MINUTES.map((min) => `<button data-min="${min}" ${off ? 'disabled' : ''}>${timerLabel(min)}</button>`).join('')}</div>` : `
         <p class="hint">${t('turnOnForTimer')}</p>`}
+      <h2>${t('autoOn')}</h2>
+      ${u.timers.on ? pending('on', u.timers.on, t('onAt', { time: clock(u.timers.on) })) : `
+        <form class="timer-on" id="onForm">
+          <input type="time" id="onTime" value="07:00" required aria-label="${t('autoOn')}">
+          <button class="btn">${t('setTimer')}</button>
+        </form>`}
+      <p class="hint">${t('onHint')}</p>
     </section>
 
     ${airflowCard(u, off)}`;
@@ -431,8 +442,12 @@ function render() {
     if (u.mode !== b.dataset.mode) change({ mode: b.dataset.mode }, t(b.dataset.mode));
   });
   wireAirflow(u, off);
-  document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer(Number(b.dataset.min)));
-  if ($('cancel')) $('cancel').onclick = () => timer(null);
+  document.querySelectorAll('.chips button').forEach((b) => b.onclick = () => timer('off', { minutes: Number(b.dataset.min) }));
+  document.querySelectorAll('[data-cancel]').forEach((b) => b.onclick = () => timer(b.dataset.cancel));
+  if ($('onForm')) $('onForm').onsubmit = (e) => {
+    e.preventDefault();
+    if ($('onTime').value) timer('on', { time: $('onTime').value });
+  };
   fitAll();
 }
 

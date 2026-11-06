@@ -19,7 +19,7 @@ it does not send any data to the developer or to any other party.
 
 - The air conditioners you added: their identifier, network address and the names you gave
   them.
-- When a switch-off timer is set, the time at which it fires.
+- When a timer to switch an air conditioner on or off is set, the time at which it fires.
 - A random identifier that AirLAN registers with each air conditioner. The air conditioner
   needs it to accept commands; it is not linked to you.
 
@@ -37,8 +37,8 @@ and sends them commands. It does not connect to the internet.
 | Permission | Why |
 |---|---|
 | Nearby devices (local network) | To find your air conditioners and control them over your home network. |
-| Alarms & reminders | To switch an air conditioner off at the exact time you chose. |
-| Notifications | Only to tell you when a timer could not switch an air conditioner off. |
+| Alarms & reminders | To switch an air conditioner on or off at the exact time you chose. |
+| Notifications | Only to tell you when a timer could not switch an air conditioner on or off. |
 | Run at startup | To set your timers again after the phone restarts. |
 
 ## Children

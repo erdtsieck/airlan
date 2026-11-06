@@ -34,13 +34,13 @@ the single source: edit them there, then copy them into the Play Console.
 |---|---|
 | Privacy policy | https://erdtsieck.github.io/airlan/privacy |
 | Ads | No ads |
-| App access | All functionality is available without special access. The app controls Mitsubishi Heavy Industries air conditioners with a WF-RAC module on the same network. Without one, tap *Try a demo unit* on the *Manage units* screen (shown on first start when no unit is found): it adds a simulated air conditioner, marked *Demo*, with every function of a real one, including the switch-off timer. The demo unit needs no permission, also not *Nearby devices* on Android 17 and newer. |
+| App access | All functionality is available without special access. The app controls Mitsubishi Heavy Industries air conditioners with a WF-RAC module on the same network. Without one, tap *Try a demo unit* on the *Manage units* screen (shown on first start when no unit is found): it adds a simulated air conditioner, marked *Demo*, with every function of a real one, including the timers. The demo unit needs no permission, also not *Nearby devices* on Android 17 and newer. |
 | Content rating | Questionnaire category *Utility, productivity, communication or other*; answer No to everything. Expected: Everyone / PEGI 3. |
 | Target audience | 18 and over (the app is not designed for children) |
 | News app | No |
 | Data safety | Does the app collect or share user data? **No.** (No data leaves the phone; see the privacy policy.) |
 | Government app / financial features / health | No |
-| Exact alarms | If the Console asks: the core function is a switch-off timer the user sets for their air conditioner; the alarm must fire at the chosen time. The permission is requested in context and the app falls back to an inexact alarm when it is denied. |
+| Exact alarms | If the Console asks: the core function is a timer the user sets to switch their air conditioner off or on; the alarm must fire at the chosen time. The permission is requested in context and the app falls back to an inexact alarm when it is denied. |
 | Local network access | If the Console asks: the app's only function is controlling air conditioners on the user's home network; it connects to nothing else. |
 
 ## 4. Store listing

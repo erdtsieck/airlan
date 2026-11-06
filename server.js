@@ -13,7 +13,7 @@ import { WfRacClient, WfRacError, RequestTrace, failureKind, MODE_NAMES, PORT as
 import { report as diagnosticsReport } from './diagnostics.js';
 import { hostsToScan, findOpen, lanAddresses, isIpv4 } from './discovery.js';
 import { browse } from './mdns.js';
-import { TIMER_GIVE_UP_MS, timerRetryDelayMs } from './timer-policy.js';
+import { TimerRunner, migrateTimers, nextOccurrence, TIMER_ACTIONS } from './timers.js';
 import { reorder } from './unit-order.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +36,9 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
  * account (operatorId) is AirLAN's shared one, see AIRLAN_OPERATOR_ID. legacyOperatorId is
  * the account of its own that AirLAN 0.1.1 and older registered; units are moved off it
  * (accountMigrated) as they are reached, see migrate().
- * @type {{ deviceId: string, legacyOperatorId?: string, units: {airconId: string, name: string | null, host: string, scheme?: string, offAt?: number, timerFailedAt?: number, accountMigrated?: boolean}[] }}
+ * Each unit's `timers` holds at most one pending timer per action (see timers.js);
+ * `timerFailed` is the last one that gave up, for the app to show.
+ * @type {{ deviceId: string, legacyOperatorId?: string, units: {airconId: string, name: string | null, host: string, scheme?: string, timers?: {on?: {at: number}, off?: {at: number}}, timerFailed?: {action: 'on' | 'off', at: number}, accountMigrated?: boolean}[] }}
  */
 let store;
 
@@ -51,6 +53,7 @@ async function loadStore() {
     store.legacyOperatorId ??= store.operatorId;
     delete store.operatorId;
   }
+  store.units.forEach(migrateTimers);
 }
 
 let saving = Promise.resolve();
@@ -236,54 +239,13 @@ async function applyChange(unit, change, { waitUpToS = 20 } = {}) {
   log(`${unit.name}: ${JSON.stringify(change)}`);
 }
 
-// ---------- off timers ----------
+// ---------- timers ----------
 
-const timers = new Map();
-
-function scheduleTimer(unit) {
-  clearTimeout(timers.get(unit.airconId));
-  timers.delete(unit.airconId);
-  if (!unit.offAt) return;
-  // A timer that expired while the server was down fires right away.
-  timers.set(unit.airconId, setTimeout(() => fireTimer(unit), Math.max(0, unit.offAt - Date.now())));
-}
-
-/**
- * Switches the unit off when its timer expires. Failures are retried (see timer-policy.js)
- * until TIMER_GIVE_UP_MS after the switch-off time; a write lock held by another client is
- * waited out. Then the timer is dropped and marked failed, for the app to show.
- */
-async function fireTimer(unit, failed = 0) {
-  const offAt = unit.offAt;
-  try {
-    await applyChange(unit, { power: false }, { waitUpToS: 0 });
-    log(`${unit.name}: timer expired, switched off`);
-    if (unit.offAt === offAt) delete unit.offAt;
-    timers.delete(unit.airconId);
-    await saveStore();
-  } catch (e) {
-    if (unit.offAt !== offAt) return; // Cancelled or replaced meanwhile.
-    const delay = Math.max(timerRetryDelayMs(failed + 1), ((e.retryAfterS ?? 0) + 2) * 1000);
-    if (Date.now() + delay <= offAt + TIMER_GIVE_UP_MS) {
-      log(`${unit.name}: timer could not switch off (${e.message}), retrying in ${Math.round(delay / 1000)} s`);
-      timers.set(unit.airconId, setTimeout(() => fireTimer(unit, failed + 1), delay));
-    } else {
-      log(`${unit.name}: timer could not switch off (${e.message}), giving up`);
-      delete unit.offAt;
-      unit.timerFailedAt = offAt;
-      timers.delete(unit.airconId);
-      await saveStore();
-    }
-  }
-}
-
-async function setTimer(unit, minutes) {
-  delete unit.timerFailedAt;
-  if (minutes == null) delete unit.offAt;
-  else unit.offAt = Date.now() + minutes * 60_000;
-  scheduleTimer(unit);
-  await saveStore();
-}
+const timers = new TimerRunner({
+  switchPower: (unit, power) => applyChange(unit, { power }, { waitUpToS: 0 }),
+  save: saveStore,
+  log,
+});
 
 // ---------- HTTP ----------
 
@@ -384,7 +346,13 @@ function migrate(unit) {
 const needsMigration = (unit) => !!store.legacyOperatorId && !unit.accountMigrated;
 
 async function unitView(unit) {
-  const base = { airconId: unit.airconId, name: unit.name, host: unit.host, offAt: unit.offAt ?? null, timerFailedAt: unit.timerFailedAt ?? null };
+  const base = {
+    airconId: unit.airconId,
+    name: unit.name,
+    host: unit.host,
+    timers: Object.fromEntries(TIMER_ACTIONS.map((a) => [a, unit.timers?.[a]?.at ?? null])),
+    timerFailed: unit.timerFailed ?? null,
+  };
   try {
     const { state } = await readStat(unit);
     if (unit.name) migrate(unit).catch(() => {});
@@ -447,6 +415,19 @@ async function serveStatic(res, path) {
   res.end(body);
 }
 
+/** When a timer goes off: the off-timer after `minutes`, the on-timer at the next `time` ("07:00"). */
+function timerAt(action, { minutes, time }) {
+  if (action === 'on') {
+    const at = nextOccurrence(time);
+    if (at == null) throw new HttpError(400, 'invalid', 'time must be a time of day as HH:MM');
+    return at;
+  }
+  if (!(Number.isInteger(minutes) && minutes > 0 && minutes <= TIMER_MAX_MINUTES)) {
+    throw new HttpError(400, 'invalid', `minutes must be an integer between 1 and ${TIMER_MAX_MINUTES}`);
+  }
+  return Date.now() + minutes * 60_000;
+}
+
 function findUnit(id) {
   const unit = store.units.find((u) => u.airconId === id);
   if (!unit) throw new HttpError(404, 'not_found', 'unknown unit');
@@ -505,12 +486,14 @@ async function route(req, res) {
     return;
   }
 
-  const m = pathname.match(/^\/api\/units\/([0-9a-f]{12})(\/timer)?$/);
+  // /timer is the older name of /timers/off.
+  const m = pathname.match(/^\/api\/units\/([0-9a-f]{12})(?:\/timers\/(on|off)|(\/timer))?$/);
   if (m) {
     const unit = findUnit(m[1]);
-    if (!m[2] && req.method === 'DELETE') {
+    const action = m[2] ?? (m[3] ? 'off' : null);
+    if (!action && req.method === 'DELETE') {
       // The account stays: it is shared with every other AirLAN client of this unit.
-      await setTimer(unit, null);
+      await timers.cancelAll(unit);
       store.units.splice(store.units.indexOf(unit), 1);
       clients.delete(unit.airconId);
       cache.delete(unit.airconId);
@@ -520,7 +503,7 @@ async function route(req, res) {
       res.writeHead(204).end();
       return;
     }
-    if (!m[2] && req.method === 'PATCH') {
+    if (!action && req.method === 'PATCH') {
       const body = await readJson(req);
       let warning = null;
       if ('name' in body) {
@@ -538,23 +521,19 @@ async function route(req, res) {
       }
       if (Object.keys(change).length) {
         await applyChange(unit, change);
-        delete unit.timerFailedAt;
-        // Switching off makes a pending timer pointless.
-        if (change.power === false && unit.offAt) await setTimer(unit, null);
+        delete unit.timerFailed;
+        // The off-timer belongs to the run it would end; an on-timer stays for its time.
+        if (change.power === false) await timers.cancel(unit, 'off');
         await saveStore();
       }
       return send(200, { ...(await unitView(unit)), ...(warning && { warning }) });
     }
-    if (m[2] && req.method === 'PUT') {
-      const { minutes } = await readJson(req);
-      if (!(Number.isInteger(minutes) && minutes > 0 && minutes <= TIMER_MAX_MINUTES)) {
-        throw new HttpError(400, 'invalid', `minutes must be an integer between 1 and ${TIMER_MAX_MINUTES}`);
-      }
-      await setTimer(unit, minutes);
+    if (action && req.method === 'PUT') {
+      await timers.set(unit, action, timerAt(action, await readJson(req)));
       return send(200, await unitView(unit));
     }
-    if (m[2] && req.method === 'DELETE') {
-      await setTimer(unit, null);
+    if (action && req.method === 'DELETE') {
+      await timers.cancel(unit, action);
       return send(200, await unitView(unit));
     }
   }
@@ -569,7 +548,7 @@ if (!store.units.length) {
   scan().then(() => log(`scan found ${store.units.length} unit(s)`));
 }
 log(`${store.units.length} unit(s): ${store.units.map((u) => `${u.name ?? u.airconId} (${u.host})`).join(', ')}`);
-for (const unit of store.units) scheduleTimer(unit);
+for (const unit of store.units) timers.schedule(unit);
 await saveStore();
 
 http
