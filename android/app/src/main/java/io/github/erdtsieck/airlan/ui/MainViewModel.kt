@@ -9,14 +9,17 @@ import androidx.lifecycle.viewModelScope
 import io.github.erdtsieck.airlan.R
 import io.github.erdtsieck.airlan.data.LocalNetworkNotAllowedException
 import io.github.erdtsieck.airlan.data.NoUnitAtAddressException
+import io.github.erdtsieck.airlan.data.ScheduleRule
 import io.github.erdtsieck.airlan.data.StoredUnit
-import io.github.erdtsieck.airlan.data.TimerAction
 import io.github.erdtsieck.airlan.discovery.Discovery
+import io.github.erdtsieck.airlan.discovery.LocalAddress
+import io.github.erdtsieck.airlan.discovery.contains
 import io.github.erdtsieck.airlan.repository
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.Mode
 import io.github.erdtsieck.airlan.wfrac.WfRacException
 import java.io.IOException
+import java.time.LocalDate
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -31,9 +34,16 @@ import kotlinx.coroutines.launch
 
 /**
  * A unit as shown: what is stored about it, plus its last known live state or why it is missing.
- * A unit that [needsPermission] is not contacted at all, so it has neither state nor error.
+ * A unit that [needsPermission] is not contacted at all, so it has neither state nor error. A
+ * unit that could not be reached while the phone is on another network is [away].
  */
-data class UnitUi(val stored: StoredUnit, val state: AirconState?, @StringRes val error: Int?, val needsPermission: Boolean = false) {
+data class UnitUi(
+    val stored: StoredUnit,
+    val state: AirconState?,
+    @StringRes val error: Int?,
+    val needsPermission: Boolean = false,
+    val away: Boolean = false,
+) {
     val online get() = state != null
 
     /** One word for where the unit stands. */
@@ -41,11 +51,12 @@ data class UnitUi(val stored: StoredUnit, val state: AirconState?, @StringRes va
     val availability get() = when {
         online -> R.string.online
         needsPermission -> R.string.needs_permission
+        away -> R.string.not_on_network
         else -> R.string.unreachable
     }
 }
 
-enum class Screen { UNIT, MANAGE }
+enum class Screen { UNIT, SCHEDULE, MANAGE }
 
 /** A line under the controls: a string, or a plural when [plural] is set, with [arg] as its number. */
 data class Status(val text: Int, val arg: Int? = null, val isError: Boolean = false, val plural: Boolean = false)
@@ -58,12 +69,16 @@ data class UiState(
     val busy: Boolean = false,
     val scanning: Boolean = false,
     val pendingTemp: Double? = null,
-    val onLocalNetwork: Boolean = true,
+    /** The phone's Wi-Fi and Ethernet addresses; null until first looked at. */
+    val localAddresses: List<LocalAddress>? = null,
     /** The user allowed the app on the local network (always so before Android 17). */
     val networkAllowed: Boolean = true,
     val status: Status? = null,
 ) {
     val selected get() = units.firstOrNull { it.stored.airconId == selectedId } ?: units.firstOrNull()
+
+    /** On Wi-Fi or Ethernet, where units can be; assumed so until looked at. */
+    val onLocalNetwork get() = localAddresses?.isNotEmpty() ?: true
 
     /** Unnamed units are numbered so they can be told apart until the user names them. */
     fun unnamedIndex(unit: UnitUi) = units.filter { it.stored.name == null }.indexOf(unit) + 1
@@ -80,7 +95,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             units = store.units.map { s ->
                 val blocked = repo.needsNetworkPermission(s)
                 val r = states[s.airconId].takeUnless { blocked }
-                UnitUi(s, r?.getOrNull(), r?.exceptionOrNull()?.let(::errorText), needsPermission = blocked)
+                val away = r?.isFailure == true && !s.demo && u.localAddresses?.none { it.contains(s.host) } == true
+                UnitUi(s, r?.getOrNull(), r?.exceptionOrNull()?.let(::errorText), needsPermission = blocked, away = away)
             },
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ui.value)
@@ -91,8 +107,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun showManage(show: Boolean) = ui.update { it.copy(screen = if (show) Screen.MANAGE else Screen.UNIT, status = null) }
 
+    fun showSchedule(show: Boolean) = ui.update { it.copy(screen = if (show) Screen.SCHEDULE else Screen.UNIT, status = null) }
+
     suspend fun refresh() {
-        ui.update { it.copy(onLocalNetwork = Discovery.onLocalNetwork(app)) }
+        ui.update { it.copy(localAddresses = Discovery.localAddresses(app)) }
         if (ui.value.busy) return
         val units = repo.units.value.units
         // Each unit shows as soon as it answers: one out of reach (which takes until its timeout)
@@ -241,9 +259,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setOffTimer(minutes: Int) = timer { repo.setOffTimer(it, minutes) }
 
-    fun setOnTimer(hour: Int, minute: Int) = timer { repo.setOnTimer(it, hour, minute) }
+    fun cancelOffTimer() = timer { repo.cancelOffTimer(it) }
 
-    fun cancelTimer(action: TimerAction) = timer { repo.cancelTimer(it, action) }
+    fun newRuleId() = repo.newRuleId()
+
+    fun saveRule(rule: ScheduleRule) = timer { repo.saveRule(it, rule) }
+
+    fun deleteRule(ruleId: String) = timer { repo.deleteRule(it, ruleId) }
+
+    fun enableRule(ruleId: String, enabled: Boolean) = timer { repo.enableRule(it, ruleId, enabled) }
+
+    fun skipNext() = timer { repo.skipNext(it) }
+
+    fun unskip() = timer { repo.unskip(it) }
+
+    /** Pauses the schedule up to and including [until]; null resumes it. */
+    fun pauseSchedule(until: LocalDate?) = timer { repo.pauseSchedule(it, until) }
 
     private fun timer(block: suspend (airconId: String) -> Unit) = viewModelScope.launch {
         val id = state.value.selected?.stored?.airconId ?: return@launch

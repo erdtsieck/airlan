@@ -1,14 +1,21 @@
 package io.github.erdtsieck.airlan.data
 
+import io.github.erdtsieck.airlan.discovery.LocalAddress
+import io.github.erdtsieck.airlan.discovery.contains
+import io.github.erdtsieck.airlan.discovery.network
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.RequestTrace
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
 /**
  * A plain-text report about one unit for the user to send to the developer: app and Android
- * version, the module's firmware and transport, and the last requests with their outcome.
+ * version, the module's firmware and transport, the network the phone is on, the schedule,
+ * and the last requests with their outcome.
  * Nothing that identifies the user goes in: no names, addresses only by their last number,
  * the MAC only by its last four digits.
  */
@@ -27,6 +34,9 @@ object Diagnostics {
         unit: StoredUnit,
         state: AirconState?,
         trace: RequestTrace?,
+        /** The phone's Wi-Fi and Ethernet addresses. */
+        network: List<LocalAddress>,
+        zone: ZoneId,
         nowMs: Long,
     ): String = buildString {
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT)
@@ -40,6 +50,8 @@ object Diagnostics {
             val m = trace?.module
             appendLine("Module: firmType ${m?.firmType ?: "?"}, wireless ${m?.wireless ?: "?"}, mcu ${m?.mcu ?: "?"}, accounts ${m?.accounts ?: "?"}")
         }
+        if (!unit.demo) appendLine(networkLine(unit, network))
+        appendLine(scheduleLine(unit.schedule, zone))
         appendLine("Model group: ${state?.modelNrRaw ?: unit.modelNrRaw ?: "?"}, left/right vane reported: ${unit.reportsVaneLR}")
         if (state != null) {
             appendLine(
@@ -73,5 +85,26 @@ object Diagnostics {
             appendLine("Events:")
             for (n in notes) appendLine("${clock.format(Date(n.atMs))} ${maskAddresses(n.text)}")
         }
+    }
+
+    /** Which network the phone is on, and whether the unit's address lies in it (see [Repository.onUnitNetwork]). */
+    private fun networkLine(unit: StoredUnit, network: List<LocalAddress>): String {
+        if (network.isEmpty()) return "Network: no Wi-Fi or Ethernet"
+        val inside = network.any { it.contains(unit.host) }
+        return "Network: ${network.joinToString { maskAddresses(it.network) }}, unit ${if (inside) "inside" else "outside"} it"
+    }
+
+    private fun scheduleLine(s: Schedule, zone: ZoneId): String {
+        if (s.rules.isEmpty()) return "Schedule: none"
+        val time = DateTimeFormatter.ofPattern("EEE HH:mm", Locale.ROOT).withZone(zone)
+        fun at(ms: Long) = time.format(Instant.ofEpochMilli(ms))
+        val parts = mutableListOf("${s.rules.size} rules, ${s.rules.count { it.enabled }} enabled")
+        s.pausedUntil?.let { parts += "paused until $it" }
+        s.run?.let { r ->
+            val action = s.rules.firstOrNull { it.id == r.ruleId }?.action?.key ?: "?"
+            parts += "next $action ${at(r.at)}" + if (r.failedAttempts > 0) ", ${r.failedAttempts} failed attempts" + (if (r.failedAtHome) " (on its network)" else "") else ""
+        }
+        s.last?.let { o -> parts += "last ${o.action.key} ${at(o.at)} " + (o.doneAt?.let { "done ${at(it)}" } ?: "not done") }
+        return "Schedule: " + parts.joinToString("; ")
     }
 }

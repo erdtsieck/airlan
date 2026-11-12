@@ -86,8 +86,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.erdtsieck.airlan.R
-import io.github.erdtsieck.airlan.data.TimerAction
-import io.github.erdtsieck.airlan.data.UnitTimer
+import io.github.erdtsieck.airlan.data.StoredUnit
 import io.github.erdtsieck.airlan.data.aimsBothVanes
 import io.github.erdtsieck.airlan.data.macLabel
 import io.github.erdtsieck.airlan.ui.MainViewModel.Companion.TEMP_MAX
@@ -99,7 +98,8 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
 
-private val TIMER_MINUTES = listOf(15, 30, 60, 120, 180, 240, 300, 360)
+/** One row of chips: the lengths people pick most. Longer runs are what the schedule is for. */
+private val TIMER_MINUTES = listOf(30, 60, 120, 240)
 
 private val GAP = 8.dp
 private val CHIP_PADDING = 8.dp
@@ -143,7 +143,7 @@ private fun displayName(state: UiState, unit: UnitUi) =
     unit.stored.name ?: stringResource(R.string.new_unit, state.unnamedIndex(unit))
 
 @Composable
-private fun modeName(mode: Mode?) = stringResource(
+internal fun modeName(mode: Mode?) = stringResource(
     when (mode) {
         Mode.COOL -> R.string.cool
         Mode.HEAT -> R.string.heat
@@ -157,7 +157,7 @@ private fun modeName(mode: Mode?) = stringResource(
 // ---------- building blocks ----------
 
 @Composable
-private fun Page(content: @Composable ColumnScope.() -> Unit) {
+internal fun Page(content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAirColors.current
     Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.TopCenter) {
         Column(
@@ -189,7 +189,7 @@ internal fun Card(modifier: Modifier = Modifier, accent: Color? = null, content:
 }
 
 @Composable
-private fun Pill(
+internal fun Pill(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -223,7 +223,7 @@ private fun Pill(
 }
 
 @Composable
-private fun RoundButton(
+internal fun RoundButton(
     icon: ImageVector? = null,
     label: String,
     onClick: () -> Unit,
@@ -285,7 +285,7 @@ private fun DemoBadge() {
 }
 
 @Composable
-private fun Hint(text: String, modifier: Modifier = Modifier) = Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, modifier = modifier)
+internal fun Hint(text: String, modifier: Modifier = Modifier) = Text(text, color = LocalAirColors.current.muted, fontSize = 14.sp, modifier = modifier)
 
 @Composable
 internal fun Heading(text: String) =
@@ -307,8 +307,8 @@ fun UnitScreen(
     onAuto3d: () -> Unit,
     onNudge: (Double) -> Unit,
     onOffTimer: (minutes: Int) -> Unit,
-    onOnTimer: (hour: Int, minute: Int) -> Unit,
-    onCancelTimer: (TimerAction) -> Unit,
+    onCancelOffTimer: () -> Unit,
+    onSchedule: () -> Unit,
     onRename: (String, String) -> Unit,
 ) = Page {
     val c = LocalAirColors.current
@@ -431,16 +431,16 @@ fun UnitScreen(
             }
         }
 
-        ModeSelector(s, enabled = !disabled, onMode, Modifier.padding(top = 14.dp))
+        ModeSelector(s?.mode, on = s?.power == true, enabled = !disabled, onMode, Modifier.padding(top = 14.dp))
     }
 
     TimersCard(
-        timers = unit.stored.timers,
+        unit = unit.stored,
         power = s?.power == true,
         enabled = !disabled,
         onOffTimer = onOffTimer,
-        onOnTimer = onOnTimer,
-        onCancel = onCancelTimer,
+        onCancelOffTimer = onCancelOffTimer,
+        onSchedule = onSchedule,
     )
 
     AirflowCard(s, unit.stored.aimsBothVanes, enabled = !disabled, onFanSpeed, onVane, onVaneLR, onAuto3d)
@@ -456,24 +456,24 @@ fun UnitScreen(
 }
 
 /**
- * Auto off and auto on in one card, each under its own heading. The off-timer counts down
- * from now (chips), so it is offered while the unit runs; the on-timer is for a time of day
- * (a clock), and can be set at any time, also while the unit runs, for the next morning.
+ * The switch-off timer and the schedule in one card. The timer counts down from now (chips),
+ * so it is offered while the unit runs. The schedule shows its next switch and the week at a
+ * glance here; it is edited on a screen of its own.
  */
 @Composable
 private fun TimersCard(
-    timers: Map<TimerAction, UnitTimer>,
+    unit: StoredUnit,
     power: Boolean,
     enabled: Boolean,
     onOffTimer: (Int) -> Unit,
-    onOnTimer: (Int, Int) -> Unit,
-    onCancel: (TimerAction) -> Unit,
+    onCancelOffTimer: () -> Unit,
+    onSchedule: () -> Unit,
 ) = Card {
     val c = LocalAirColors.current
     Heading(stringResource(R.string.auto_off))
-    val off = timers[TimerAction.OFF]
+    val off = unit.offTimer
     when {
-        off != null -> PendingTimer(stringResource(R.string.off_at, clockTime(off.at)), off.at) { onCancel(TimerAction.OFF) }
+        off != null -> PendingTimer(stringResource(R.string.off_at, clockTime(off.at)), off.at, onCancelOffTimer)
         power -> {
             val labels = TIMER_MINUTES.map { m -> if (m < 60) stringResource(R.string.minutes_short, m) else stringResource(R.string.hours_short, m / 60) }
             FittingGrid(labels, maxColumns = 4, chrome = CHIP_PADDING * 2 + 2.dp) { i, modifier ->
@@ -485,61 +485,10 @@ private fun TimersCard(
 
     Box(Modifier.padding(vertical = 14.dp).fillMaxWidth().height(1.dp).background(c.line))
 
-    Heading(stringResource(R.string.auto_on))
-    val on = timers[TimerAction.ON]
-    var picking by remember { mutableStateOf(false) }
-    if (on != null) {
-        PendingTimer(stringResource(R.string.on_at, clockTime(on.at)), on.at) { onCancel(TimerAction.ON) }
-    } else {
-        HintBesideButton(stringResource(R.string.on_timer_hint), stringResource(R.string.pick_time)) { picking = true }
-    }
-    if (picking) {
-        OnTimeDialog(
-            onDismiss = { picking = false },
-            onSet = { hour, minute ->
-                picking = false
-                onOnTimer(hour, minute)
-            },
-        )
-    }
+    ScheduleSummary(unit.schedule, onSchedule)
 }
 
-/**
- * A hint with a button to its right, as long as the hint then needs at most two lines;
- * otherwise (a large font, a narrow screen, a long translation) the button goes under it, so
- * the hint does not become a narrow column of short lines.
- */
-@Composable
-private fun HintBesideButton(hint: String, label: String, onClick: () -> Unit) {
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val hintStyle = LocalTextStyle.current.copy(fontSize = 14.sp)
-    val labelStyle = LocalTextStyle.current.copy(fontWeight = FontWeight.Medium)
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val gap = 12.dp
-        // The lines the hint really breaks into beside the button, not an estimate from its width.
-        val hintLines = with(density) {
-            // The Pill's padding and border, and a little slack for rounding.
-            val button = measurer.measure(label, labelStyle, maxLines = 1).size.width.toDp() + 14.dp * 2 + 4.dp
-            val room = (maxWidth - button - gap).coerceAtLeast(0.dp).roundToPx()
-            measurer.measure(hint, hintStyle, constraints = Constraints(maxWidth = room)).lineCount
-        }
-        if (hintLines <= 2) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Hint(hint, Modifier.weight(1f))
-                Spacer(Modifier.width(gap))
-                Pill(label, onClick)
-            }
-        } else {
-            Column {
-                Hint(hint)
-                Pill(label, onClick, Modifier.padding(top = 10.dp))
-            }
-        }
-    }
-}
-
-private fun clockTime(at: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(at))
+internal fun clockTime(at: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(at))
 
 /** A timer that is set: when it goes off, how long from now, and a way to cancel it. */
 @Composable
@@ -570,13 +519,13 @@ private fun PendingTimer(text: String, at: Long, onCancel: () -> Unit) {
 }
 
 /**
- * The clock for the on-timer, or the keyboard entry it can switch to. Only the picker goes
- * in the content: the dialog sizes itself to it. What the timer needs is said on the card.
+ * A clock to pick a time of day on, or the keyboard entry it can switch to. Only the picker
+ * goes in the content: the dialog sizes itself to it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OnTimeDialog(onDismiss: () -> Unit, onSet: (hour: Int, minute: Int) -> Unit) {
-    val state = rememberTimePickerState(initialHour = 7, initialMinute = 0)
+internal fun TimeDialog(initialHour: Int, initialMinute: Int, onDismiss: () -> Unit, onSet: (hour: Int, minute: Int) -> Unit) {
+    val state = rememberTimePickerState(initialHour = initialHour, initialMinute = initialMinute)
     var mode by remember { mutableStateOf(TimePickerDisplayMode.Picker) }
     TimePickerDialog(
         onDismissRequest = onDismiss,
@@ -596,7 +545,7 @@ private fun OnTimeDialog(onDismiss: () -> Unit, onSet: (hour: Int, minute: Int) 
     }
 }
 
-private val MODES = listOf(
+internal val MODES = listOf(
     Mode.AUTO to AirIcons.auto,
     Mode.COOL to AirIcons.cool,
     Mode.HEAT to AirIcons.heat,
@@ -606,11 +555,12 @@ private val MODES = listOf(
 
 /**
  * The five operating modes as one segmented row of icons, in the order of the remote. The
- * current mode is filled in its colour (outlined while the unit is off); its name is under the
- * setpoint, so no label has to fit a fifth of the width. Each icon is named for screen readers.
+ * [selected] mode is filled in its colour (outlined while the unit is not [on]); its name is
+ * under the setpoint, so no label has to fit a fifth of the width. Each icon is named for
+ * screen readers.
  */
 @Composable
-private fun ModeSelector(s: AirconState?, enabled: Boolean, onMode: (Mode) -> Unit, modifier: Modifier = Modifier) {
+internal fun ModeSelector(selectedMode: Mode?, on: Boolean, enabled: Boolean, onMode: (Mode) -> Unit, modifier: Modifier = Modifier) {
     val c = LocalAirColors.current
     val track = RoundedCornerShape(16.dp)
     val groupLabel = stringResource(R.string.mode)
@@ -626,9 +576,8 @@ private fun ModeSelector(s: AirconState?, enabled: Boolean, onMode: (Mode) -> Un
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         for ((mode, icon) in MODES) {
-            val selected = s?.mode == mode
+            val selected = selectedMode == mode
             val color = c.of(mode)
-            val on = s?.power == true
             val shape = RoundedCornerShape(12.dp)
             val name = modeName(mode)
             Box(

@@ -3,6 +3,7 @@ package io.github.erdtsieck.airlan.data
 import io.github.erdtsieck.airlan.discovery.Announced
 import io.github.erdtsieck.airlan.discovery.Discovery
 import io.github.erdtsieck.airlan.discovery.LocalAddress
+import io.github.erdtsieck.airlan.discovery.contains
 import io.github.erdtsieck.airlan.discovery.hostsToScan
 import io.github.erdtsieck.airlan.wfrac.AirconClient
 import io.github.erdtsieck.airlan.wfrac.AirconState
@@ -14,12 +15,15 @@ import io.github.erdtsieck.airlan.wfrac.WfRacClient
 import io.github.erdtsieck.airlan.wfrac.WfRacException
 import java.io.IOException
 import java.net.InetAddress
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -31,7 +35,7 @@ class NoUnitAtAddressException(host: String) : Exception("no WF-RAC module answe
 class LocalNetworkNotAllowedException : Exception("the local network permission is not granted")
 
 /**
- * Everything the app does with units: discovery, reading, writing and the timers.
+ * Everything the app does with units: discovery, reading, writing, the timer and the schedule.
  * Shared by the UI and the timer receiver, so there is one client (and one request queue)
  * per unit in the process.
  */
@@ -116,12 +120,15 @@ class Repository(
     /**
      * Looks for a unit that stopped answering, in case DHCP gave it another address: asks mDNS
      * first, which names the unit directly, and falls back to a full scan (at most once a
-     * minute). Returns whether the unit is now known at a different address.
+     * minute). The scan is only made on the unit's own network: on any other (at work, on a
+     * guest network) the unit is not there to be found, and sweeping someone else's network
+     * would only look like an attack. Returns whether the unit is now known at a different address.
      */
     private suspend fun relocate(unit: StoredUnit): Boolean {
         val found = announced().firstOrNull { it.airconId == unit.airconId }
         when {
             found != null && found.host != unit.host -> runCatching { adopt(found.host) }
+            found == null && !onUnitNetwork(unit) -> traceOf(unit.airconId).note("not found by mDNS, and not on its network: not searching", now())
             found == null && now() - lastScan >= 60_000 -> {
                 traceOf(unit.airconId).note("not found by mDNS: searching the network", now())
                 scan(verifyKnown = false)
@@ -130,6 +137,14 @@ class Repository(
         val host = store.unit(unit.airconId)?.host
         return host != null && host != unit.host
     }
+
+    /**
+     * Whether the phone is on [unit]'s network: a Wi-Fi or Ethernet network its address lies
+     * in. Away from home this is false, and so it is for a unit behind a router on another
+     * network of the same home; it decides what to search and how a failure is told, never
+     * whether the unit is contacted.
+     */
+    fun onUnitNetwork(unit: StoredUnit) = unit.demo || localAddresses().any { it.contains(unit.host) }
 
     private suspend fun persistTransport(airconId: String, client: AirconClient) {
         val unit = store.unit(airconId) ?: return
@@ -141,7 +156,7 @@ class Repository(
 
     /** A report about [airconId] to share with the developer; see [Diagnostics]. */
     fun diagnostics(airconId: String, appVersion: String, androidVersion: String, state: AirconState?): String =
-        Diagnostics.report(appVersion, androidVersion, require(airconId), state, traces[airconId], now())
+        Diagnostics.report(appVersion, androidVersion, require(airconId), state, traces[airconId], localAddresses(), zone(), now())
 
     suspend fun state(airconId: String): AirconState =
         withUnit(airconId) { it.getStat(airconId) }.also { noteAirflowSupport(airconId, it) }
@@ -153,7 +168,6 @@ class Repository(
         store.updateUnit(airconId) { it.copy(modelNrRaw = s.modelNrRaw, reportsVaneLR = it.reportsVaneLR || s.vaneLRReported) }
     }
 
-    /** Writes need an account registered with the unit; registering the same id again is idempotent. */
     /**
      * Writes need an account registered with the unit; registering the same id again is
      * idempotent. A unit this installation registered its own account with (AirLAN 0.1.1 and
@@ -188,6 +202,23 @@ class Repository(
     }
 
     /**
+     * The user changes the unit: [write], after which a switch-off timer ends with the run it
+     * belonged to, and a schedule switch that is still being retried is dropped: what the user
+     * does now comes before a switch that should have happened earlier.
+     */
+    suspend fun apply(
+        airconId: String,
+        waitUpToS: Int = WRITE_WAIT_S,
+        onWait: (seconds: Int) -> Unit = {},
+        change: (AirconState) -> AirconState,
+    ): AirconState {
+        val written = write(airconId, waitUpToS, onWait, change)
+        if (!written.power) cancelOffTimer(airconId)
+        dropLateSwitch(airconId)
+        return written
+    }
+
+    /**
      * Applies [change] to the unit's current state and writes it. On a refusal it finds out why:
      *  - another client holds the write lock: waits for it to lapse when that takes at most
      *    [waitUpToS] (telling [onWait] how long) and tries once more, or throws
@@ -195,9 +226,9 @@ class Repository(
      *  - otherwise our account may be gone (deleted from elsewhere): registers again, which
      *    throws [WfRacException.NO_ACCOUNT_SLOT] when the unit is full, and tries once more.
      */
-    suspend fun apply(
+    private suspend fun write(
         airconId: String,
-        waitUpToS: Int = WRITE_WAIT_S,
+        waitUpToS: Int,
         onWait: (seconds: Int) -> Unit = {},
         change: (AirconState) -> AirconState,
     ): AirconState {
@@ -231,8 +262,6 @@ class Repository(
             }
         }
         noteAirflowSupport(airconId, written)
-        // The off-timer belongs to the run it would end. An on-timer stays: it is for a time of day.
-        if (!written.power) cancelTimer(airconId, TimerAction.OFF)
         return written
     }
 
@@ -337,7 +366,7 @@ class Repository(
 
     /** Forgets a unit. Its account stays: it is shared with every other AirLAN client of the unit. */
     suspend fun forget(airconId: String) {
-        for (action in TimerAction.entries) timers.cancel(airconId, action)
+        for (alarm in Alarm.entries) timers.cancel(airconId, alarm)
         store.update { s -> s.copy(units = s.units.filterNot { it.airconId == airconId }) }
         clients.remove(airconId)
     }
@@ -360,54 +389,56 @@ class Repository(
         }
     }
 
+    private fun zone(): ZoneId = ZoneId.of(timezone())
+
+    // ---------- the switch-off timer ----------
+
     /** Switches the unit off [minutes] from now. */
     suspend fun setOffTimer(airconId: String, minutes: Int) {
         require(minutes in 1..MAX_TIMER_MINUTES) { "minutes must be between 1 and $MAX_TIMER_MINUTES" }
-        setTimer(airconId, TimerAction.OFF, now() + minutes * 60_000L)
+        val timer = UnitTimer(now() + minutes * 60_000L)
+        store.updateUnit(airconId) { it.copy(offTimer = timer) }
+        timers.schedule(airconId, Alarm.OFF_TIMER, timer.dueAt)
     }
 
-    /** Switches the unit on the next time the clock reads [hour]:[minute]. */
-    suspend fun setOnTimer(airconId: String, hour: Int, minute: Int) {
-        require(hour in 0..23 && minute in 0..59) { "not a time of day: $hour:$minute" }
-        setTimer(airconId, TimerAction.ON, nextOccurrence(now(), hour, minute, ZoneId.of(timezone())))
-    }
-
-    /** Sets the unit's [action] timer, replacing the one it had. */
-    private suspend fun setTimer(airconId: String, action: TimerAction, at: Long) {
-        val timer = UnitTimer(at)
-        store.updateUnit(airconId) { it.copy(timers = it.timers + (action to timer)) }
-        timers.schedule(airconId, action, timer.dueAt)
-    }
-
-    suspend fun cancelTimer(airconId: String, action: TimerAction) {
-        if (store.unit(airconId)?.timers?.get(action) == null) return
-        timers.cancel(airconId, action)
-        store.updateUnit(airconId) { it.copy(timers = it.timers - action) }
+    suspend fun cancelOffTimer(airconId: String) {
+        if (store.unit(airconId)?.offTimer == null) return
+        timers.cancel(airconId, Alarm.OFF_TIMER)
+        store.updateUnit(airconId) { it.copy(offTimer = null) }
     }
 
     sealed interface TimerOutcome {
         data object Switched : TimerOutcome
         data object NotDue : TimerOutcome
         data class Retrying(val attempt: Int) : TimerOutcome
-        data class GaveUp(val error: Exception) : TimerOutcome
+        /** It did not work although the phone was on the unit's network: worth telling the user. */
+        data class GaveUp(val error: Exception?) : TimerOutcome
+        /** The phone was never on the unit's network while it could have worked: nothing to tell. */
+        data object Missed : TimerOutcome
+    }
+
+    /** Firings for one unit take turns: an alarm can go off more than once for the same attempt (see [rescheduleAll]). */
+    private suspend fun <T> firingFor(airconId: String, block: suspend () -> T): T = firing.computeIfAbsent(airconId) { Mutex() }.withLock { block() }
+
+    /** The next attempt after [failed] failed attempts, later if another client's write lock lapses later. */
+    private fun retryAt(failed: Int, error: Exception?): Long {
+        val lockLapsesIn = (error as? WfRacException)?.retryAfterS?.let { (it + 2) * 1000L } ?: 0L
+        return now() + maxOf(timerRetryDelayMs(failed), lockLapsesIn)
     }
 
     /**
-     * Called when a unit's alarm for [action] goes off. Writes the power, or records the failure
+     * Called when a unit's switch-off alarm goes off. Writes the power, or records the failure
      * and schedules a retry (see [timerRetryDelayMs]): the unit may be out of reach for a while,
      * or another client may hold its 60-second write lock, which is then waited out. The attempt
      * count lives in the stored [UnitTimer], so it survives the process and [rescheduleAll]; a
      * retry that would come later than [TIMER_GIVE_UP_MS] after the timer's time is not made,
      * and the timer is given up.
-     *
-     * An alarm can go off more than once for the same attempt (see [rescheduleAll]), so firings
-     * for one unit take turns, and each one works from the stored timer as it finds it.
      */
-    suspend fun fireTimer(airconId: String, action: TimerAction): TimerOutcome = firing.computeIfAbsent(airconId) { Mutex() }.withLock {
-        val timer = store.unit(airconId)?.timers?.get(action) ?: return@withLock TimerOutcome.NotDue
+    suspend fun fireOffTimer(airconId: String): TimerOutcome = firingFor(airconId) {
+        val timer = store.unit(airconId)?.offTimer ?: return@firingFor TimerOutcome.NotDue
         if (timer.dueAt > now() + 1000) {
-            timers.schedule(airconId, action, timer.dueAt) // Rescheduled since this alarm was set.
-            return@withLock TimerOutcome.NotDue
+            timers.schedule(airconId, Alarm.OFF_TIMER, timer.dueAt) // Rescheduled since this alarm was set.
+            return@firingFor TimerOutcome.NotDue
         }
 
         // Replaces the timer by [next], unless the user cancelled or replaced it meanwhile:
@@ -415,9 +446,9 @@ class Repository(
         suspend fun settle(next: UnitTimer?): Boolean {
             var same = false
             store.updateUnit(airconId) { u ->
-                if (u.timers[action] != timer) return@updateUnit u
+                if (u.offTimer != timer) return@updateUnit u
                 same = true
-                u.copy(timers = if (next == null) u.timers - action else u.timers + (action to next))
+                u.copy(offTimer = next)
             }
             return same
         }
@@ -425,36 +456,163 @@ class Repository(
         try {
             // Runs inside a broadcast receiver, which Android gives about a minute. An
             // unreachable unit costs a timeout per transport plus a rescan, so bound the attempt.
-            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { apply(airconId, waitUpToS = 0) { it.copy(power = action.power) } }
+            withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { write(airconId, waitUpToS = 0) { it.copy(power = false) } }
             settle(null)
             TimerOutcome.Switched
         } catch (e: Exception) {
             val failed = timer.failedAttempts + 1
-            val lockLapsesIn = (e as? WfRacException)?.retryAfterS?.let { (it + 2) * 1000L } ?: 0L
-            val retryAt = now() + maxOf(timerRetryDelayMs(failed), lockLapsesIn)
+            val retryAt = retryAt(failed, e)
             val next = if (retryAt <= timer.at + TIMER_GIVE_UP_MS) timer.copy(failedAttempts = failed, retryAt = retryAt) else null
             when {
                 !settle(next) -> TimerOutcome.NotDue
                 next != null -> {
-                    timers.schedule(airconId, action, next.dueAt)
+                    timers.schedule(airconId, Alarm.OFF_TIMER, next.dueAt)
                     TimerOutcome.Retrying(failed)
                 }
                 else -> {
-                    timers.cancel(airconId, action)
+                    timers.cancel(airconId, Alarm.OFF_TIMER)
                     TimerOutcome.GaveUp(e)
                 }
             }
         }
     }
 
+    // ---------- the schedule ----------
+
+    /** Adds [rule] to the unit's schedule, or replaces the rule with its id. */
+    suspend fun saveRule(airconId: String, rule: ScheduleRule) = editSchedule(airconId) { s ->
+        val rules = if (s.rules.any { it.id == rule.id }) s.rules.map { if (it.id == rule.id) rule else it } else s.rules + rule
+        s.copy(rules = rules.sortedBy { it.minuteOfDay })
+    }
+
+    suspend fun deleteRule(airconId: String, ruleId: String) = editSchedule(airconId) { s -> s.copy(rules = s.rules.filterNot { it.id == ruleId }) }
+
+    suspend fun enableRule(airconId: String, ruleId: String, enabled: Boolean) = editSchedule(airconId) { s ->
+        s.copy(rules = s.rules.map { if (it.id == ruleId) it.copy(enabled = enabled) else it })
+    }
+
+    /** Skips the schedule's next switch. A one-time rule is turned off instead: skipped, it has nothing left to do. */
+    suspend fun skipNext(airconId: String) = editSchedule(airconId) { s ->
+        val run = s.run ?: return@editSchedule s
+        val rule = s.rules.firstOrNull { it.id == run.ruleId }
+        if (rule?.once == true) s.copy(rules = s.rules.map { if (it.id == rule.id) it.copy(enabled = false) else it })
+        else s.copy(skipAt = run.at)
+    }
+
+    suspend fun unskip(airconId: String) = editSchedule(airconId) { it.copy(skipAt = null) }
+
+    /** No rule runs up to and including [until]; null resumes the schedule. */
+    suspend fun pauseSchedule(airconId: String, until: LocalDate?) = editSchedule(airconId) { it.copy(pausedUntil = until) }
+
+    /** A new rule's id, unique within the unit's schedule. */
+    fun newRuleId(): String = UUID.randomUUID().toString().take(8)
+
+    private suspend fun editSchedule(airconId: String, edit: (Schedule) -> Schedule) {
+        store.updateUnit(airconId) { u -> u.copy(schedule = u.schedule.replanned(edit(u.schedule), now(), zone())) }
+        syncScheduleAlarm(airconId)
+    }
+
+    private fun syncScheduleAlarm(airconId: String) {
+        val run = store.unit(airconId)?.schedule?.run
+        if (run != null) timers.schedule(airconId, Alarm.SCHEDULE, run.dueAt) else timers.cancel(airconId, Alarm.SCHEDULE)
+    }
+
+    /** See [apply]: a schedule switch still being retried gives way to what the user does. */
+    private suspend fun dropLateSwitch(airconId: String) {
+        if ((store.unit(airconId)?.schedule?.run?.failedAttempts ?: 0) == 0) return
+        store.updateUnit(airconId) { u ->
+            if (u.schedule.run?.failedAttempts == 0) u else u.copy(schedule = u.schedule.planned(now(), zone()))
+        }
+        syncScheduleAlarm(airconId)
+    }
+
     /**
-     * Sets every unit's alarms from its stored timers. Android drops alarms on a reboot, an
-     * update and, without telling the app, when the user revokes the exact-alarm permission; so
-     * this runs whenever the process starts. Overdue ones fire right away; a pending retry keeps
-     * its attempt count.
+     * Called when a unit's schedule alarm goes off: makes the switch the rule asks for. A switch
+     * that fails is tried again on the timer's schedule (see [timerRetryDelayMs]) until its
+     * window closes (see [Schedule.windowEnd]); after that the next switch is planned. While
+     * the phone has no Wi-Fi or Ethernet at all it is not tried, only planned again.
+     *
+     * The outcome tells whether the user should hear of a failure: only when the phone was on
+     * the unit's network and the unit did not answer ([TimerOutcome.GaveUp]). A switch missed
+     * because the phone was elsewhere ([TimerOutcome.Missed]) is only shown on the schedule.
+     */
+    suspend fun fireSchedule(airconId: String): TimerOutcome = firingFor(airconId) {
+        val unit = store.unit(airconId) ?: return@firingFor TimerOutcome.NotDue
+        val schedule = unit.schedule
+        val run = schedule.run ?: return@firingFor TimerOutcome.NotDue
+        if (run.dueAt > now() + 1000) {
+            timers.schedule(airconId, Alarm.SCHEDULE, run.dueAt)
+            return@firingFor TimerOutcome.NotDue
+        }
+        val zone = zone()
+        val rule = schedule.rules.firstOrNull { it.id == run.ruleId && it.enabled }
+        if (rule == null) {
+            editSchedule(airconId) { it }
+            return@firingFor TimerOutcome.NotDue
+        }
+
+        // Replaces the run by what comes after it, unless the user changed the schedule
+        // meanwhile. Returns whether it was still this run.
+        suspend fun settle(transform: (Schedule) -> Schedule): Boolean {
+            var same = false
+            store.updateUnit(airconId) { u ->
+                if (u.schedule.run != run) return@updateUnit u
+                same = true
+                u.copy(schedule = transform(u.schedule))
+            }
+            syncScheduleAlarm(airconId)
+            return same
+        }
+
+        // The rule is done with, switched or not: a one-time rule turns itself off, and the
+        // next switch is planned from now (switches missed meanwhile are past their window).
+        suspend fun finish(doneAt: Long?) = settle { s ->
+            val rules = if (rule.once) s.rules.map { if (it.id == rule.id) it.copy(enabled = false) else it } else s.rules
+            s.copy(rules = rules, last = ScheduleOutcome(rule.action, run.at, doneAt)).planned(maxOf(now(), run.at), zone)
+        }
+
+        val windowEnd = schedule.windowEnd(run, zone)
+        val connected = unit.demo || localAddresses().isNotEmpty()
+        var error: Exception? = null
+        if (now() < windowEnd && connected) {
+            try {
+                withTimeout(TIMER_ATTEMPT_TIMEOUT_MS) { write(airconId, waitUpToS = 0, change = rule::applyTo) }
+                return@firingFor if (finish(now())) TimerOutcome.Switched else TimerOutcome.NotDue
+            } catch (e: Exception) {
+                error = e
+            }
+        }
+        val failedAtHome = run.failedAtHome || (error != null && onUnitNetwork(unit))
+        val failed = run.failedAttempts + 1
+        val retryAt = retryAt(failed, error)
+        when {
+            retryAt < windowEnd -> {
+                val retrying = settle { it.copy(run = run.copy(failedAttempts = failed, retryAt = retryAt, failedAtHome = failedAtHome)) }
+                if (retrying) TimerOutcome.Retrying(failed) else TimerOutcome.NotDue
+            }
+            !finish(null) -> TimerOutcome.NotDue
+            failedAtHome -> TimerOutcome.GaveUp(error)
+            else -> TimerOutcome.Missed
+        }
+    }
+
+    /**
+     * Sets every unit's alarms from its stored timer and schedule. Android drops alarms on a
+     * reboot, an update and, without telling the app, when the user revokes the exact-alarm
+     * permission; so this runs whenever the process starts. Overdue ones fire right away; a
+     * pending retry keeps its attempt count.
      */
     fun rescheduleAll() {
-        for (u in store.state.value.units) for ((action, t) in u.timers) timers.schedule(u.airconId, action, t.dueAt)
+        // A schedule whose next switch was never planned (a state file written by hand, or by
+        // a tool) gets one now: enabled rules always have a planned switch.
+        val unplanned = store.state.value.units.filter { u -> u.schedule.run == null && u.schedule.rules.any { it.enabled } }
+        if (unplanned.isNotEmpty()) runBlocking {
+            for (u in unplanned) store.updateUnit(u.airconId) { it.copy(schedule = it.schedule.planned(now(), zone())) }
+        }
+        for (u in store.state.value.units) {
+            u.offTimer?.let { timers.schedule(u.airconId, Alarm.OFF_TIMER, it.dueAt) }
+            u.schedule.run?.let { timers.schedule(u.airconId, Alarm.SCHEDULE, it.dueAt) }
+        }
     }
 
     companion object {

@@ -43,6 +43,9 @@ object AirIcons {
         "M9.9 13.2c-2.1 2-5.2 2.9-6.9.8c-1.5-1.9.6-4 3-3.2c1.4.5 2.7 1.3 3.9 2.4z",
     )
     val up = stroke(2f, "M6 15l6-6l6 6")
+    val back = stroke(2f, "M15 6l-6 6l6 6")
+    val forward = stroke(2f, "M9 6l6 6l-6 6")
+    val plus = stroke(2.2f, "M12 5v14M5 12h14")
     val down = stroke(2f, "M6 9l6 6l6-6")
     val edit = stroke(2f, "M4 20h4L19 9l-4-4L4 16z")
     val cube = stroke(2f, "M12 3l8 4.5v9L12 21l-8-4.5v-9z", "M12 12l8-4.5M12 12v9M12 12L4 7.5")

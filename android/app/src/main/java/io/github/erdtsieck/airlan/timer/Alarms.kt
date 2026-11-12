@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.github.erdtsieck.airlan.AirLanApp
 import io.github.erdtsieck.airlan.R
+import io.github.erdtsieck.airlan.data.Alarm
 import io.github.erdtsieck.airlan.data.Repository.TimerOutcome
 import io.github.erdtsieck.airlan.data.TimerAction
 import io.github.erdtsieck.airlan.data.TimerScheduler
@@ -25,50 +26,53 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Timers as alarms, so they fire with the app closed and the phone asleep.
+ * The switch-off timer and the schedule as alarms, so they fire with the app closed and the
+ * phone asleep.
  *
  * Every timer gets an inexact alarm, which needs no permission, and on top of that an exact
  * one when the user allows exact alarms. Revoking that permission makes Android delete the
  * app's exact alarms (and kill it) without telling it; the inexact alarm survives and still
  * switches the unit, if possibly some minutes late. Whichever goes off first does the work;
- * [io.github.erdtsieck.airlan.data.Repository.fireTimer] makes the other a no-op.
+ * [io.github.erdtsieck.airlan.data.Repository.fireOffTimer] and
+ * [io.github.erdtsieck.airlan.data.Repository.fireSchedule] make the other a no-op.
  */
 class AlarmTimerScheduler(private val context: Context) : TimerScheduler {
     private val alarms = context.getSystemService(AlarmManager::class.java)
 
-    /** One PendingIntent per unit, action and kind, told apart by their data URI. */
-    private fun intent(airconId: String, action: TimerAction, kind: String): PendingIntent = PendingIntent.getBroadcast(
+    /** One PendingIntent per unit, alarm and kind, told apart by their data URI. */
+    private fun intent(airconId: String, alarm: Alarm, kind: String): PendingIntent = PendingIntent.getBroadcast(
         context,
         0,
         Intent(context, TimerReceiver::class.java)
             .setAction(ACTION_FIRE)
             .setData(
                 Uri.Builder().scheme("airlan").authority("timer")
-                    .appendPath(airconId).appendPath(action.key).appendPath(kind).build(),
+                    .appendPath(airconId).appendPath(alarm.key).appendPath(kind).build(),
             )
             .putExtra(EXTRA_AIRCON_ID, airconId)
-            .putExtra(EXTRA_TIMER_ACTION, action.key),
+            .putExtra(EXTRA_ALARM, alarm.key),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    override fun schedule(airconId: String, action: TimerAction, atMillis: Long) {
-        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, intent(airconId, action, INEXACT))
+    override fun schedule(airconId: String, alarm: Alarm, atMillis: Long) {
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, intent(airconId, alarm, INEXACT))
         if (canScheduleExact(context)) {
-            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, intent(airconId, action, EXACT))
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, intent(airconId, alarm, EXACT))
         } else {
-            alarms.cancel(intent(airconId, action, EXACT))
+            alarms.cancel(intent(airconId, alarm, EXACT))
         }
     }
 
-    override fun cancel(airconId: String, action: TimerAction) {
-        alarms.cancel(intent(airconId, action, EXACT))
-        alarms.cancel(intent(airconId, action, INEXACT))
+    override fun cancel(airconId: String, alarm: Alarm) {
+        alarms.cancel(intent(airconId, alarm, EXACT))
+        alarms.cancel(intent(airconId, alarm, INEXACT))
     }
 
     companion object {
         const val ACTION_FIRE = "io.github.erdtsieck.airlan.action.FIRE_TIMER"
         const val EXTRA_AIRCON_ID = "airconId"
-        const val EXTRA_TIMER_ACTION = "timerAction"
+        /** Named "timerAction" from when the alarms were per action; the switch-off timer's alarms still carry it. */
+        const val EXTRA_ALARM = "timerAction"
         private const val EXACT = "exact"
         private const val INEXACT = "inexact"
 
@@ -79,25 +83,37 @@ class AlarmTimerScheduler(private val context: Context) : TimerScheduler {
 
 private val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-/** An alarm went off: switch the unit on or off, and tell the user if that keeps failing. */
+/**
+ * An alarm went off: switch the unit, and tell the user when that keeps failing although the
+ * phone was on the unit's network. AirLAN 0.4's switch-on alarms ("on") are not answered: the
+ * update cancelled them, and their timer is now a schedule rule with an alarm of its own.
+ */
 class TimerReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != AlarmTimerScheduler.ACTION_FIRE) return
         val airconId = intent.getStringExtra(AlarmTimerScheduler.EXTRA_AIRCON_ID) ?: return
-        val key = intent.getStringExtra(AlarmTimerScheduler.EXTRA_TIMER_ACTION)
-        val action = TimerAction.entries.firstOrNull { it.key == key } ?: return
+        val key = intent.getStringExtra(AlarmTimerScheduler.EXTRA_ALARM)
+        val alarm = Alarm.entries.firstOrNull { it.key == key } ?: return
         val pending = goAsync()
         receiverScope.launch {
             try {
-                val outcome = context.repository.fireTimer(airconId, action)
-                if (outcome is TimerOutcome.GaveUp) notifyFailure(context, airconId, action)
+                val repo = context.repository
+                when (alarm) {
+                    Alarm.OFF_TIMER -> if (repo.fireOffTimer(airconId) is TimerOutcome.GaveUp) {
+                        notifyFailure(context, airconId, TimerAction.OFF, R.string.timer_failed_text)
+                    }
+                    Alarm.SCHEDULE -> if (repo.fireSchedule(airconId) is TimerOutcome.GaveUp) {
+                        val action = repo.units.value.units.firstOrNull { it.airconId == airconId }?.schedule?.last?.action
+                        if (action != null) notifyFailure(context, airconId, action, R.string.schedule_failed_text)
+                    }
+                }
             } finally {
                 pending.finish()
             }
         }
     }
 
-    private fun notifyFailure(context: Context, airconId: String, action: TimerAction) {
+    private fun notifyFailure(context: Context, airconId: String, action: TimerAction, text: Int) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -118,8 +134,8 @@ class TimerReceiver : BroadcastReceiver() {
         val notification = NotificationCompat.Builder(context, AirLanApp.TIMER_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
-            .setContentText(context.getString(R.string.timer_failed_text))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(R.string.timer_failed_text)))
+            .setContentText(context.getString(text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(text)))
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()

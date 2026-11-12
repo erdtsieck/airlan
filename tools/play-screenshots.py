@@ -63,12 +63,27 @@ def tap_text(text, timeout=30):
         time.sleep(1)
 
 
+WEEKDAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+WEEKEND = ["SATURDAY", "SUNDAY"]
+
+# The living room's schedule. The app plans its next switch when it starts.
+SCHEDULE = {
+    "rules": [
+        {"id": "s1", "action": "on", "minuteOfDay": 6 * 60 + 45, "days": WEEKDAYS, "mode": "HEAT", "temp": 21.0},
+        {"id": "s2", "action": "off", "minuteOfDay": 8 * 60 + 30, "days": WEEKDAYS},
+        {"id": "s3", "action": "on", "minuteOfDay": 9 * 60, "days": WEEKEND, "mode": "HEAT", "temp": 20.0},
+        {"id": "s4", "action": "on", "minuteOfDay": 17 * 60 + 30, "days": WEEKDAYS},
+        {"id": "s5", "action": "off", "minuteOfDay": 22 * 60 + 30, "days": WEEKDAYS + WEEKEND},
+    ],
+}
+
+
 def state(lang_living, lang_bed, lang_study):
     now = int(time.time() * 1000)
     s = {
         "deviceId": "airlan-shots",
         "units": [
-            {"airconId": "fa4e00000001", "name": lang_living, "host": HOSTS[0], "scheme": "HTTP", "offAt": now + 120 * 60_000 - 30_000, "accountMigrated": True},
+            {"airconId": "fa4e00000001", "name": lang_living, "host": HOSTS[0], "scheme": "HTTP", "offAt": now + 120 * 60_000 - 30_000, "accountMigrated": True, "schedule": SCHEDULE},
             {"airconId": "fa4e00000002", "name": lang_bed, "host": HOSTS[1], "scheme": "HTTP", "accountMigrated": True},
             {"airconId": "fa4e00000003", "name": lang_study, "host": HOSTS[2], "scheme": "HTTP", "accountMigrated": True},
         ],
@@ -133,6 +148,9 @@ for lang in ("en", "nl"):
     scroll(down=True)
     shot("5-airflow", lang, bottom=True)
     scroll(down=False)
+    tap_text("Schedule" if lang == "en" else "Schema")
+    shot("6-schedule", lang)
+    sh("input keyevent KEYCODE_BACK")
     tap_text(bed)
     shot("2-bedroom", lang)
     tap_text("Manage units" if lang == "en" else "Airco’s beheren")
