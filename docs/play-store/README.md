@@ -91,7 +91,7 @@ Play support can reset it, but that takes days.
 
 ## Recreating the screenshots
 
-`tools/play-screenshots.py` makes all ten (five per language: two units, the airflow card,
-managing units, dark) on an emulator, against three stand-in units (`tools/fake-unit.mjs`);
+`tools/play-screenshots.py` makes all twelve (six per language: two units, the airflow card,
+managing units, dark, the schedule) on an emulator, against three stand-in units (`tools/fake-unit.mjs`);
 its header says how to start them. It captures at 1080×2400 and crops to 1080×1920, the top
 or, for the airflow card, the bottom: Play requires phone screenshots in 16:9 or 9:16.

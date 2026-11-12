@@ -59,6 +59,26 @@ fun hostsToScan(addresses: List<LocalAddress>): List<String> {
     return hosts.toList()
 }
 
+/**
+ * Whether [host] lies on this device's network [address]/prefix: the units AirLAN can find
+ * and expects there. A unit outside it may still be reachable through a router (a separate
+ * network for appliances), so this decides what to search, never whom to talk to.
+ */
+fun LocalAddress.contains(host: String): Boolean {
+    val parts = host.split('.')
+    if (parts.size != 4 || parts.any { p -> p.isEmpty() || p.length > 3 || !p.all(Char::isDigit) || p.toInt() > 255 }) return false
+    if (prefixLength !in 0..32) return false
+    val mask = if (prefixLength == 0) 0L else (0xffffffffL shl (32 - prefixLength)) and 0xffffffffL
+    return toLong(host) and mask == toLong(address) and mask
+}
+
+/** The network [address] belongs to, e.g. 192.168.1.0/24. */
+val LocalAddress.network: String
+    get() {
+        val mask = if (prefixLength == 0) 0L else (0xffffffffL shl (32 - prefixLength)) and 0xffffffffL
+        return toIp(toLong(address) and mask) + "/" + prefixLength
+    }
+
 object Discovery {
     // Android 17 (API 37) made the local network a runtime permission. Before that,
     // INTERNET covers it and the permission does not exist. Android 16 only restricts the
@@ -86,9 +106,6 @@ object Discovery {
             .filter { it.address is Inet4Address && !it.address.isLoopbackAddress }
             .map { LocalAddress(it.address.hostAddress!!, it.prefixLength) }
     }
-
-    /** Whether the phone is on a network where the units can be: Wi-Fi or Ethernet. */
-    fun onLocalNetwork(context: Context) = localAddresses(context).isNotEmpty()
 
     private fun portOpen(host: String, port: Int, timeoutMs: Int): Boolean = try {
         Socket().use { it.connect(InetSocketAddress(host, port), timeoutMs) }

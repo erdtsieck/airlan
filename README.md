@@ -12,7 +12,11 @@ Per unit you can:
 - switch it on or off
 - choose the mode: auto, cooling, heating, drying or fan only
 - set the temperature (16–30 °C in 0.5° steps)
-- have it switch off automatically after 15 or 30 minutes or 1–6 hours
+- have it switch off automatically after a set time: 30 minutes or 1, 2 or 4 hours in the
+  app, 15 or 30 minutes or 1–6 hours in the web app
+- switch it on and off by a schedule: in the app, rules for set times on chosen days
+  (switching on in its last setting or in a chosen mode and temperature); in the web app,
+  a time of day to switch it on
 - set the fan speed (auto, quiet, low, medium, high) and the direction, at the bottom of the
   screen: up/down (swing, or highest to lowest) and, on units that have them, left/right
   (swing, five directions, wide or narrow) and 3D auto, which aims both vanes itself
@@ -59,11 +63,23 @@ number.
 ## Android app
 
 The app finds the units on your Wi-Fi network, asks you to name them, and runs the
-timers as alarms on the phone: switch off after a set time, and switch on at a time of
-day (with the unit's last mode, temperature and airflow). A timer fires with the app
-closed, survives a restart, keeps trying for 75 minutes if the unit cannot be reached (see
-*Limitations*) and then notifies you. The phone has to be on the home network when the
-timer fires.
+switch-off timer and each unit's schedule as alarms on the phone, so they fire with the app
+closed and survive a restart. The phone has to be on the home network when they fire.
+
+- The switch-off timer keeps trying for 75 minutes if the unit cannot be reached (see
+  *Limitations*) and then notifies you.
+- The schedule is a list of rules: switch on or off at a time, on chosen days (no day: once).
+  A switch-on brings the unit back in its last setting, or in a mode and temperature the
+  rule names. The unit screen shows the next switch and the week as seven bars; the
+  schedule has its own screen, where the next switch can be skipped and the whole schedule
+  paused until a date. A switch that fails is tried again until the unit's next switch (at
+  most 12 hours), so a switch-on at 17:30 still happens when the phone comes home at 18:10.
+  Only a failure while the phone was on the unit's network is notified; one missed because
+  the phone was elsewhere is shown on the schedule screen.
+- Anything the user does to the unit replaces a switch that is still being retried.
+- Away from the unit's network (its address is not in the phone's Wi-Fi network) the app
+  still asks the unit directly, which reaches units behind a router, but it never searches
+  that network for it, and says *Not on this network* instead of *Unreachable*.
 
 No air conditioner at hand? *Try a demo unit* (on the *Manage units* screen) adds a
 simulated unit, marked *Demo*, that works like a real one: power, the modes,

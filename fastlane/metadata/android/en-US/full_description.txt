@@ -4,15 +4,15 @@ What you can do, per air conditioner:
 • Switch it on or off
 • Choose auto, cooling, heating, drying or fan only
 • Set the temperature in half degrees
-• Have it switch off automatically after 15 or 30 minutes or 1 to 6 hours
-• Have it switch on automatically at a time you choose, with its last settings
+• Have it switch off automatically after 30 minutes or 1, 2 or 4 hours
+• Give it a schedule: switch it on and off at set times on the days you choose, in its last setting or in a mode and temperature you pick
 • Set the fan speed and the direction of the air, including 3D auto on units that have it
 
 With several air conditioners, a tile per unit shows at a glance which ones are running.
 
 That is all, on purpose. AirLAN finds the air conditioners on your network by itself and asks you to name them. You can also add one by IP address, for example when your smart devices live on a separate network.
 
-The timers run on your phone as alarms, so they also work with the app closed and after a restart. If the air conditioner cannot be reached when a timer goes off, AirLAN keeps trying for over an hour (the Wi-Fi module sometimes drops off the network for a while) and tells you if it did not work.
+The timer and the schedule run on your phone as alarms, so they also work with the app closed and after a restart. If the air conditioner cannot be reached, AirLAN keeps trying: the timer for over an hour (the Wi-Fi module sometimes drops off the network for a while), a scheduled switch until the next one, so it still happens when you come home late. It tells you if it did not work while your phone was home.
 
 No air conditioner at hand? Tap "Try a demo unit" to try AirLAN with a simulated one, clearly marked as a demo, timer included.
 

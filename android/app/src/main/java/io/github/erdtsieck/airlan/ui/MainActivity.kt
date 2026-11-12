@@ -82,7 +82,7 @@ private fun App(vm: MainViewModel) {
         }
     }
 
-    // A timer the user picked, held while they are asked for the exact-alarm permission.
+    // A timer or rule the user set, held while they are asked for the exact-alarm permission.
     var exactAlarmAsk by remember { mutableStateOf<(() -> Unit)?>(null) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
@@ -96,7 +96,7 @@ private fun App(vm: MainViewModel) {
         set()
     }
 
-    /** Every timer goes through here: ask for exact alarms first if they are not allowed. */
+    /** Every timer and schedule rule goes through here: ask for exact alarms first if they are not allowed. */
     fun requestTimer(set: () -> Unit) {
         if (AlarmTimerScheduler.canScheduleExact(context)) startTimer(set) else exactAlarmAsk = set
     }
@@ -123,6 +123,18 @@ private fun App(vm: MainViewModel) {
     val diagnosticsSubject = stringResource(R.string.diagnostics_subject)
     val shareDiagnostics = stringResource(R.string.share_diagnostics)
     when {
+        state.screen == Screen.SCHEDULE && state.selected != null -> ScheduleScreen(
+            state = state,
+            unit = state.selected!!,
+            onBack = { vm.showSchedule(false) },
+            newRuleId = vm::newRuleId,
+            onSave = { rule -> requestTimer { vm.saveRule(rule) } },
+            onDelete = vm::deleteRule,
+            onEnable = { id, enabled -> if (enabled) requestTimer { vm.enableRule(id, true) } else vm.enableRule(id, false) },
+            onSkip = vm::skipNext,
+            onUnskip = vm::unskip,
+            onPause = vm::pauseSchedule,
+        )
         state.screen == Screen.MANAGE || (state.loaded && state.units.isEmpty()) -> ManageScreen(
             state = state,
             permission = permission,
@@ -154,8 +166,8 @@ private fun App(vm: MainViewModel) {
             onAuto3d = vm::setAuto3d,
             onNudge = vm::nudgeTemp,
             onOffTimer = { minutes -> requestTimer { vm.setOffTimer(minutes) } },
-            onOnTimer = { hour, minute -> requestTimer { vm.setOnTimer(hour, minute) } },
-            onCancelTimer = vm::cancelTimer,
+            onCancelOffTimer = vm::cancelOffTimer,
+            onSchedule = { vm.showSchedule(true) },
             onRename = vm::rename,
         )
     }

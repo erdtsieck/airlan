@@ -1,14 +1,8 @@
 package io.github.erdtsieck.airlan.data
 
-import java.time.Instant
-import java.time.ZoneId
-import java.time.ZonedDateTime
-
 /**
- * What a timer does when it fires: write [power] and nothing else, so switching on brings
- * back the unit's last mode, temperature and airflow. A unit has at most one pending timer
- * per action (see [StoredUnit.timers]). [key] names the action in the state file and in
- * alarm URIs; it must not change.
+ * What a switch does: write [power] (and, for a schedule rule with a setting, the mode and
+ * temperature). [key] names the action in the state file; it must not change.
  */
 enum class TimerAction(val power: Boolean, val key: String) {
     ON(true, "on"),
@@ -16,9 +10,9 @@ enum class TimerAction(val power: Boolean, val key: String) {
 }
 
 /**
- * A pending switch-on or switch-off, retries included. This is the single source of truth
- * for its alarm: Android can drop alarms (reboot, update, a revoked exact-alarm permission),
- * so the alarm is always derived from this, never the other way round.
+ * The pending switch-off timer, retries included. This is the single source of truth for its
+ * alarm: Android can drop alarms (reboot, update, a revoked exact-alarm permission), so the
+ * alarm is always derived from this, never the other way round.
  */
 data class UnitTimer(
     /** Epoch millis at which the user wants the unit switched. */
@@ -33,22 +27,21 @@ data class UnitTimer(
 }
 
 /**
- * Schedules the moment a unit's timer fires. Backed by AlarmManager on the device. It
- * carries no state of its own: what to do when it fires is read from the stored [UnitTimer].
+ * The alarms a unit can have: its switch-off timer and its schedule's next switch. [key] names
+ * the alarm in its intent; "off" is what the switch-off timer's alarms were set with before
+ * the schedule existed, so they keep working across the update.
  */
-interface TimerScheduler {
-    fun schedule(airconId: String, action: TimerAction, atMillis: Long)
-    fun cancel(airconId: String, action: TimerAction)
+enum class Alarm(val key: String) {
+    OFF_TIMER("off"),
+    SCHEDULE("schedule"),
 }
 
 /**
- * The next moment after [now] at which the clock in [zone] reads [hour]:[minute]: today if
- * that is still ahead, else tomorrow. A time that a daylight-saving change skips is moved
- * forward by the length of the gap, as [ZonedDateTime.of] does.
+ * Sets the moment a unit's alarm goes off. Backed by AlarmManager on the device. It carries
+ * no state of its own: what to do when it goes off is read from the stored [UnitTimer] or
+ * [ScheduleRun].
  */
-fun nextOccurrence(now: Long, hour: Int, minute: Int, zone: ZoneId): Long {
-    val today = ZonedDateTime.ofInstant(Instant.ofEpochMilli(now), zone)
-    val at = today.toLocalDate().atTime(hour, minute).atZone(zone)
-    val next = if (at.toInstant().toEpochMilli() > now) at else today.toLocalDate().plusDays(1).atTime(hour, minute).atZone(zone)
-    return next.toInstant().toEpochMilli()
+interface TimerScheduler {
+    fun schedule(airconId: String, alarm: Alarm, atMillis: Long)
+    fun cancel(airconId: String, alarm: Alarm)
 }

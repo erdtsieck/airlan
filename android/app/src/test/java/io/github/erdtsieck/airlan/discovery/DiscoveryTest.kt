@@ -56,4 +56,16 @@ class DiscoveryTest {
         assertEquals(null, airconIdOf("Living room printer"))
         assertEquals(null, airconIdOf("e81656c09e4"))
     }
+
+    @Test
+    fun `a host is on a network when it shares the network's prefix`() {
+        val home = LocalAddress("192.168.68.118", 24)
+        assertTrue(home.contains("192.168.68.109"))
+        assertFalse(home.contains("192.168.69.109"))
+        assertTrue(LocalAddress("10.1.6.20", 22).contains("10.1.4.1"))
+        assertFalse(LocalAddress("10.1.6.20", 22).contains("10.1.8.1"))
+        assertFalse(home.contains("demo"))
+        assertEquals("192.168.68.0/24", home.network)
+        assertEquals("10.1.4.0/22", LocalAddress("10.1.6.20", 22).network)
+    }
 }
