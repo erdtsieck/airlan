@@ -7,6 +7,7 @@ Wat je per airco kunt doen:
 • Hem automatisch laten uitgaan na 30 minuten of 1, 2 of 4 uur
 • Hem een schema geven: aan en uit op vaste tijden op de dagen die je kiest, in de laatste stand of in een stand en temperatuur die je kiest
 • De ventilatorsnelheid en de richting van de lucht instellen, ook 3D auto op airco's die dat hebben
+• De buitenunit stiller laten draaien, zoals de SILENT-knop op de afstandsbediening
 
 Met meerdere airco's zie je aan een tegel per airco in één oogopslag welke aanstaan.
 

@@ -131,4 +131,28 @@ class CodecTest {
         val frame = vectors.getJSONArray("encode").getJSONObject(0).getString("frame")
         assertNull(Codec.decode(frame).indoorTemp)
     }
+
+    @Test
+    fun `a segment frame carries its segments, no set-bits and the power value only`() {
+        val frame = Codec.encodeSegments(power = true, coolHotJudge = false, listOf(Silent.write(true), Silent.read))
+        val d = java.util.Base64.getDecoder().decode(frame).map { it.toInt() and 0xff }
+        val command = d.subList(0, 18)
+        assertEquals(1, command[2])
+        assertEquals(listOf(0, 0), command.subList(3, 5))
+        assertEquals(0xff, command[5])
+        assertEquals(8, command[8])
+        assertEquals(2, d[18])
+        assertEquals(listOf(0x21, 1, 0xff, 0xff, 0xdd, 0xff, 0xff, 0xff), d.subList(19, 27))
+        val crc = Codec.crc16(d.subList(0, 27).toIntArray())
+        assertEquals(listOf(crc and 0xff, crc shr 8), d.subList(27, 29))
+        assertEquals(listOf(Segment(0xff, 0xff, 0xff, 0xff)), Codec.segments(frame))
+    }
+
+    @Test
+    fun `silent operation is read from the answer, and absent when not answered`() {
+        assertEquals(true, Silent.of(listOf(Segment(0x80, 0x20, 0x5a, 0), Segment(0xdd, 0x80, 0x20, 0))))
+        assertEquals(false, Silent.of(listOf(Segment(0xdd, 0x80, 0x00, 0))))
+        assertNull(Silent.of(listOf(Segment(0x80, 0x20, 0x5a, 0))))
+        assertEquals(listOf(0x21, 0, 0xff, 0xff), Silent.write(false).let { listOf(it.code, it.op1, it.op2, it.op3) })
+    }
 }

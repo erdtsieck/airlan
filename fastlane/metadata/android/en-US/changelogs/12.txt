@@ -1,0 +1,1 @@
+AirLAN 1.0.0. New: a quiet outdoor unit, like the SILENT button on the remote, at the bottom of the unit screen (in the app, on units that have it). The status and navigation bars are now set by the theme, the way Android 15 wants it. Updated libraries.

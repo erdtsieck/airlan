@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- From Android 10 the system puts a scrim behind three-button navigation itself. -->
+    <color name="navigation_bar">@android:color/transparent</color>
+</resources>

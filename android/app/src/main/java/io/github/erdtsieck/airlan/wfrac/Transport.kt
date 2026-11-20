@@ -34,6 +34,7 @@ class WfRacException(val code: String, message: String, val result: Int? = null,
         const val UNIT_BUSY = "unit_busy"
         const val NO_ACCOUNT_SLOT = "no_account_slot"
         const val BAD_RESPONSE = "bad_response"
+        const val NOT_SUPPORTED = "not_supported"
     }
 }
 

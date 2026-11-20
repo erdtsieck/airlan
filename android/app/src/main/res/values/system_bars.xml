@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="light_bars">true</bool>
+    <!-- Android 8.0 cannot draw dark navigation buttons: a dark scrim behind its light ones. -->
+    <color name="navigation_bar">#801B1B1B</color>
+</resources>

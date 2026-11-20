@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -103,7 +105,9 @@ private fun flowColors(mode: Mode?): FlowColors {
  * Fan speed and the vanes, below the timer as they are needed least: rows of a label with the
  * current value on the left and a drawing to tap on the right (below the label when they do
  * not fit side by side). 3D auto, which aims both vanes, is a toggle in the header; it and the
- * left/right rows are only there for a unit that [aimsBothVanes].
+ * left/right rows are only there for a unit that [aimsBothVanes]. Silent operation, the
+ * remote's SILENT button, closes the card: it quiets the outdoor unit, and it is there until
+ * the unit has shown it lacks it ([hasSilent]); [silent] is null while its state is unknown.
  */
 @Composable
 internal fun AirflowCard(
@@ -114,6 +118,9 @@ internal fun AirflowCard(
     onVane: (Int) -> Unit,
     onVaneLR: (Int) -> Unit,
     onAuto3d: () -> Unit,
+    hasSilent: Boolean,
+    silent: Boolean?,
+    onSilent: (Boolean) -> Unit,
 ) {
     val f = flowColors(s?.mode)
     val auto3d = aimsBothVanes && s?.entrust == true
@@ -172,6 +179,20 @@ internal fun AirflowCard(
                 }
             }
         }
+
+        if (hasSilent) {
+            HorizontalDivider(color = f.line)
+            val title = stringResource(R.string.silent)
+            LabelledRow(title, value = null, f, caption = stringResource(R.string.silent_hint)) {
+                Switch(
+                    checked = silent == true,
+                    onCheckedChange = onSilent,
+                    enabled = enabled,
+                    modifier = Modifier.semantics { contentDescription = title },
+                    colors = SwitchDefaults.colors(checkedTrackColor = f.accent, checkedBorderColor = f.accent),
+                )
+            }
+        }
     }
 }
 
@@ -180,13 +201,14 @@ internal fun AirflowCard(
  * two do not fit side by side, the control goes below the label, still on the right.
  */
 @Composable
-private fun LabelledRow(title: String, value: String?, f: FlowColors, minor: Boolean = false, control: @Composable () -> Unit) {
+private fun LabelledRow(title: String, value: String?, f: FlowColors, minor: Boolean = false, caption: String? = null, control: @Composable () -> Unit) {
     val c = LocalAirColors.current
     Layout(
         content = {
             Column {
                 Text(title, fontSize = 14.sp, fontWeight = if (minor) FontWeight.Normal else FontWeight.Medium, color = if (minor) f.muted else c.text)
                 if (value != null) Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = f.accent)
+                if (caption != null) Text(caption, fontSize = 12.sp, color = f.muted)
             }
             Row(verticalAlignment = Alignment.CenterVertically) { control() }
         },

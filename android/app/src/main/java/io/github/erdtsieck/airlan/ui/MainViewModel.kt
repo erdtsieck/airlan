@@ -245,6 +245,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 3D auto: the unit aims both vanes itself. */
     fun setAuto3d() = write { it.copy(entrust = true) }
 
+    /**
+     * Silent operation: the outdoor unit runs quieter, at less capacity. It is not part of the
+     * state and goes to the unit on its own; see [Repository.setSilent].
+     */
+    fun setSilent(on: Boolean) {
+        val id = state.value.selected?.stored?.airconId ?: return
+        viewModelScope.launch {
+            ui.update { it.copy(busy = true, status = null) }
+            try {
+                val reported = repo.setSilent(id, on, onWait = { s -> ui.update { it.copy(status = Status(R.string.waiting_for_unit, s)) } })
+                ui.update { it.copy(status = if (reported == on) null else Status(R.string.error_silent_not_applied, isError = true)) }
+            } catch (e: Exception) {
+                fail(e)
+            } finally {
+                ui.update { it.copy(busy = false) }
+            }
+        }
+    }
+
     /** The module wants to be addressed calmly: only send once the taps have stopped. */
     fun nudgeTemp(delta: Double) {
         val current = state.value.pendingTemp ?: state.value.selected?.state?.presetTemp ?: return
@@ -304,6 +323,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 WfRacException.UNIT_REFUSED -> R.string.error_unit_refused
                 WfRacException.UNIT_BUSY -> if (e.retryAfterS != null) R.string.error_unit_busy else R.string.error_unit_refused
                 WfRacException.NO_ACCOUNT_SLOT -> R.string.error_no_account_slot
+                WfRacException.NOT_SUPPORTED -> R.string.error_silent_not_supported
                 else -> R.string.error_bad_response
             }
             is IllegalArgumentException -> R.string.error_invalid

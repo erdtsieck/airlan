@@ -10,7 +10,6 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
@@ -22,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,7 +37,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Edge to edge: from Android 15 every app is drawn so. Before that the window is told
+        // here, and the bars' colours come from the theme. Not enableEdgeToEdge(): it sets them
+        // in code, with calls Android 15 deprecated, and Play flags every app that contains them.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             AirLanTheme {
                 App(vm)
@@ -164,6 +167,7 @@ private fun App(vm: MainViewModel) {
             onVane = vm::setVane,
             onVaneLR = vm::setVaneLR,
             onAuto3d = vm::setAuto3d,
+            onSilent = vm::setSilent,
             onNudge = vm::nudgeTemp,
             onOffTimer = { minutes -> requestTimer { vm.setOffTimer(minutes) } },
             onCancelOffTimer = vm::cancelOffTimer,

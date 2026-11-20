@@ -305,6 +305,7 @@ fun UnitScreen(
     onVane: (Int) -> Unit,
     onVaneLR: (Int) -> Unit,
     onAuto3d: () -> Unit,
+    onSilent: (Boolean) -> Unit,
     onNudge: (Double) -> Unit,
     onOffTimer: (minutes: Int) -> Unit,
     onCancelOffTimer: () -> Unit,
@@ -443,7 +444,10 @@ fun UnitScreen(
         onSchedule = onSchedule,
     )
 
-    AirflowCard(s, unit.stored.aimsBothVanes, enabled = !disabled, onFanSpeed, onVane, onVaneLR, onAuto3d)
+    AirflowCard(
+        s, unit.stored.aimsBothVanes, enabled = !disabled, onFanSpeed, onVane, onVaneLR, onAuto3d,
+        hasSilent = unit.stored.hasSilent, silent = unit.stored.silent, onSilent = onSilent,
+    )
 
     StatusLine(state.status ?: unit.error?.let { Status(it, isError = true) })
 

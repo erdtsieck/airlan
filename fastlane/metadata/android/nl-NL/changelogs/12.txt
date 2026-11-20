@@ -1,0 +1,1 @@
+AirLAN 1.0.0. Nieuw: een stille buitenunit, zoals de SILENT-knop op de afstandsbediening, onderaan het unitscherm (in de app, op airco's die het hebben). De status- en navigatiebalk komen nu uit het thema, zoals Android 15 het wil. Bijgewerkte bibliotheken.

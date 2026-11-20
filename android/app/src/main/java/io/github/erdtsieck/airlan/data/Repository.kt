@@ -9,6 +9,7 @@ import io.github.erdtsieck.airlan.wfrac.AirconClient
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.DemoClient
 import io.github.erdtsieck.airlan.wfrac.RequestTrace
+import io.github.erdtsieck.airlan.wfrac.Silent
 import io.github.erdtsieck.airlan.wfrac.UnitUnreachableException
 import io.github.erdtsieck.airlan.wfrac.WFRAC_PORT
 import io.github.erdtsieck.airlan.wfrac.WfRacClient
@@ -263,6 +264,67 @@ class Repository(
         }
         noteAirflowSupport(airconId, written)
         return written
+    }
+
+    /**
+     * Switches silent operation and returns the state the unit then reports. The write goes
+     * out as operation data (see [Silent]), which the unit answers with a refusal or an
+     * unreadable body even when it applied it; so the state is read back, and that read
+     * decides. Both take the write lock, so another client's lock is waited for first, as
+     * [write] does. A unit that refuses the read, also after registering again, does not have
+     * silent operation: that is remembered ([StoredUnit.hasSilent]) and
+     * [WfRacException.NOT_SUPPORTED] thrown.
+     */
+    suspend fun setSilent(
+        airconId: String,
+        on: Boolean,
+        waitUpToS: Int = WRITE_WAIT_S,
+        onWait: (seconds: Int) -> Unit = {},
+    ): Boolean {
+        if (airconId !in registered) register(airconId)
+        val status = withUnit(airconId) { it.getStatus(airconId) }
+        if (status.lockedForS > 0) {
+            if (status.lockedForS > waitUpToS) throw busy(airconId, status.lockedForS, null)
+            onWait(status.lockedForS)
+            sleep((status.lockedForS + 1) * 1000L)
+        }
+        val power = status.state.power
+        val coolHotJudge = status.state.coolHotJudge
+        suspend fun read(): Boolean = withUnit(airconId) { client ->
+            // An unreadable answer is the module's, not the unit's: asked once more before believing it.
+            val answers = try {
+                client.exchange(airconId, power, coolHotJudge, listOf(Silent.read))
+            } catch (e: WfRacException) {
+                if (e.code != WfRacException.BAD_RESPONSE) throw e
+                client.exchange(airconId, power, coolHotJudge, listOf(Silent.read))
+            }
+            Silent.of(answers) ?: throw WfRacException(WfRacException.BAD_RESPONSE, "no silent operation in the answer")
+        }
+        withUnit(airconId) { client ->
+            try {
+                client.exchange(airconId, power, coolHotJudge, listOf(Silent.write(on)))
+            } catch (e: WfRacException) {
+                if (e.code != WfRacException.UNIT_REFUSED && e.code != WfRacException.BAD_RESPONSE) throw e
+            }
+        }
+        val reported = try {
+            read()
+        } catch (e: WfRacException) {
+            if (e.code != WfRacException.UNIT_REFUSED) throw e
+            val locked = runCatching { withUnit(airconId) { it.getStatus(airconId) }.lockedForS }.getOrDefault(0)
+            if (locked > 0) throw busy(airconId, locked, e.result)
+            registered -= airconId
+            register(airconId)
+            try {
+                read()
+            } catch (again: WfRacException) {
+                if (again.code != WfRacException.UNIT_REFUSED) throw again
+                store.updateUnit(airconId) { it.copy(hasSilent = false, silent = null) }
+                throw WfRacException(WfRacException.NOT_SUPPORTED, "unit $airconId does not know silent operation", again.result)
+            }
+        }
+        store.updateUnit(airconId) { it.copy(silent = reported, hasSilent = true) }
+        return reported
     }
 
     private fun busy(airconId: String, seconds: Int, result: Int?) =

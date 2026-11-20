@@ -38,6 +38,14 @@ data class StoredUnit(
     val modelNrRaw: Int? = null,
     /** Once true, the unit has shown that it reports its left/right vane; see [AirconState.vaneLRReported]. */
     val reportsVaneLR: Boolean = false,
+    /**
+     * Silent operation as the unit last reported it (see [io.github.erdtsieck.airlan.wfrac.Silent]);
+     * null until it has been read. A unit tells nothing of it unless asked, and asking takes
+     * the write lock, so it is read only when the user switches it.
+     */
+    val silent: Boolean? = null,
+    /** False once the unit has refused silent operation: it does not have it. */
+    val hasSilent: Boolean = true,
 )
 
 /**
@@ -111,6 +119,8 @@ class UnitStore(private val file: File, private val zone: () -> ZoneId = ZoneId:
                     accountMigrated = u.optBoolean("accountMigrated", false),
                     modelNrRaw = if (u.has("modelNrRaw")) u.getInt("modelNrRaw") else null,
                     reportsVaneLR = u.optBoolean("reportsVaneLR", false),
+                    silent = if (u.has("silent")) u.getBoolean("silent") else null,
+                    hasSilent = u.optBoolean("hasSilent", true),
                 )
             },
         )
@@ -237,6 +247,8 @@ class UnitStore(private val file: File, private val zone: () -> ZoneId = ZoneId:
                                 if (u.accountMigrated) put("accountMigrated", true)
                                 u.modelNrRaw?.let { put("modelNrRaw", it) }
                                 if (u.reportsVaneLR) put("reportsVaneLR", true)
+                                u.silent?.let { put("silent", it) }
+                                if (!u.hasSilent) put("hasSilent", false)
                             }
                     },
                 ),

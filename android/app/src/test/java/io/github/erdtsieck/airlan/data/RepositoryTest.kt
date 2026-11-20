@@ -7,6 +7,8 @@ import io.github.erdtsieck.airlan.wfrac.WfRacException
 import io.github.erdtsieck.airlan.wfrac.Codec
 import io.github.erdtsieck.airlan.wfrac.Mode
 import io.github.erdtsieck.airlan.wfrac.Scheme
+import io.github.erdtsieck.airlan.wfrac.Segment
+import io.github.erdtsieck.airlan.wfrac.Silent
 import java.io.File
 import java.io.IOException
 import java.net.InetAddress
@@ -52,6 +54,32 @@ class RepositoryTest {
             lockExpires = clock + lockSeconds
         }
 
+        /** Silent operation; a unit that lacks it ([silentSupported] false) refuses its codes with result 11. */
+        @Volatile var silent = false
+        @Volatile var silentSupported = true
+
+        /** The COMMAND block's segments, or null for a state write (the "nothing to send" sentinel). */
+        fun commandSegments(frame: String): List<Segment>? {
+            val d = java.util.Base64.getDecoder().decode(frame).map { it.toInt() and 0xff }
+            val segments = (0 until d[18]).map { i -> Segment(d[19 + i * 4], d[20 + i * 4], d[21 + i * 4], d[22 + i * 4]) }
+            return if (segments == listOf(Segment(0xff, 0xff, 0xff, 0xff))) null else segments
+        }
+
+        /** The answers to the last operation-data request, for its reply. */
+        private var answers = emptyList<Segment>()
+
+        /** [s] and [answers] as the unit reports them: byte 12 pinned to 1 when [legacy]. */
+        fun frame(s: AirconState, answers: List<Segment>): String {
+            val bytes = java.util.Base64.getDecoder().decode(frame(s)).toMutableList()
+            if (answers.isEmpty()) return frame(s)
+            val start = bytes[18] * 4 + 21
+            bytes[start + 18] = (bytes[start + 18] + answers.size).toByte()
+            val body = bytes.subList(start, bytes.size - 2).map { it.toInt() and 0xff } + answers.flatMap { listOf(it.code, it.op1, it.op2, it.op3) }
+            val crc = Codec.crc16(body.toIntArray())
+            val out = bytes.subList(0, start).map { it.toInt() and 0xff } + body + listOf(crc and 0xff, crc shr 8)
+            return java.util.Base64.getEncoder().encodeToString(ByteArray(out.size) { out[it].toByte() })
+        }
+
         /** Reports byte 12 pinned to 1, as a unit with the legacy bus signature does. */
         @Volatile var legacy = false
 
@@ -95,6 +123,7 @@ class RepositoryTest {
                         val device = payload.getString("deviceId")
                         val request = payload.optJSONObject("contents")
                         val contents = JSONObject().put("airconId", airconId)
+                        answers = emptyList()
                         val result = when (command) {
                             "updateAccountInfo" -> {
                                 val id = request!!.getString("accountId")
@@ -104,6 +133,23 @@ class RepositoryTest {
                             "setAirconStat" -> when {
                                 operator !in accounts -> 2
                                 lockWriter != null && lockExpires >= clock && lockWriter != device -> 1
+                                commandSegments(request!!.getString("airconStat")) != null -> {
+                                    val segments = commandSegments(request.getString("airconStat"))!!
+                                    if (!silentSupported || segments.any { it.code != Silent.WRITE && it.code != Silent.READ }) {
+                                        11
+                                    } else {
+                                        lockWriter = device
+                                        lockExpires = clock + 60
+                                        val write = segments.firstOrNull { it.code == Silent.WRITE }
+                                        if (write != null) {
+                                            silent = write.op1 == 1
+                                            11 // Applied all the same, as the real module answers it.
+                                        } else {
+                                            answers = listOf(Segment(Silent.READ, 0x80, if (silent) 0x20 else 0, 0))
+                                            0
+                                        }
+                                    }
+                                }
                                 else -> {
                                     state = Codec.decode(request!!.getString("airconStat"))
                                     lockWriter = device
@@ -114,7 +160,7 @@ class RepositoryTest {
                             else -> 0
                         }
                         if (command == "getAirconStat" || command == "setAirconStat") {
-                            contents.put("airconStat", frame(state)).put("expires", lockExpires).put("numOfAccount", accounts.size)
+                            contents.put("airconStat", frame(state, answers)).put("expires", lockExpires).put("numOfAccount", accounts.size)
                         }
                         val body = JSONObject().put("result", result).put("contents", contents).toString()
                         it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.toByteArray().size}\r\n\r\n$body".toByteArray())
@@ -220,6 +266,54 @@ class RepositoryTest {
         assertEquals(22.5, unit.state.presetTemp, 0.0)
         assertEquals(Codec.decode(liveFrame).windLR, unit.state.windLR)
         assertFalse("request bodies must not escape slashes", unit.sawEscapedSlash)
+    }
+
+    @Test
+    fun `silent operation is written, read back and remembered, the state left alone`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        val before = unit.state
+
+        assertTrue(repo.setSilent(ID, true))
+        assertTrue(unit.silent)
+        assertEquals(before, unit.state)
+        assertEquals(true, repository().stored().silent)
+
+        assertFalse(repo.setSilent(ID, false))
+        assertFalse(unit.silent)
+        assertEquals(false, repository().stored().silent)
+    }
+
+    @Test
+    fun `the demo unit has silent operation`() = runBlocking {
+        val repo = repository()
+        repo.addDemo("Demo")
+        assertTrue(repo.setSilent(Repository.DEMO_AIRCON_ID, true))
+        assertEquals(true, repo.units.value.units.single().silent)
+    }
+
+    @Test
+    fun `a unit without silent operation is remembered as such`() = runBlocking {
+        unit.silentSupported = false
+        val repo = repository()
+        repo.add("127.0.0.1")
+
+        val e = runCatching { repo.setSilent(ID, true) }.exceptionOrNull()
+        assertEquals(WfRacException.NOT_SUPPORTED, code(e))
+        assertFalse(repository().stored().hasSilent)
+        assertNull(repository().stored().silent)
+    }
+
+    @Test
+    fun `silent operation waits for another app's lock first`() = runBlocking {
+        val repo = repository()
+        repo.add("127.0.0.1")
+        unit.otherWrite(lockSeconds = 5)
+        val waited = mutableListOf<Int>()
+
+        assertTrue(repo.setSilent(ID, true, onWait = { waited += it }))
+        assertEquals(1, waited.size)
+        assertTrue(unit.silent)
     }
 
     @Test
