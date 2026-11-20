@@ -41,6 +41,14 @@ interface AirconClient {
     suspend fun setStat(airconId: String, state: AirconState): AirconState
 
     /**
+     * Sends [segments] in a frame that changes nothing in the state (see [Codec.encodeSegments])
+     * and returns the answers the unit put in its reply. [power] is the unit's current power.
+     * Like any setAirconStat it takes the write lock. Throws [WfRacException] when the unit
+     * refuses, which it also does when it does not know one of the codes.
+     */
+    suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): List<Segment>
+
+    /**
      * Writes require a registered account ([ACCOUNT_SLOTS] per unit). Re-registering the same
      * id is idempotent. Throws [WfRacException.NO_ACCOUNT_SLOT] when the unit is full.
      */

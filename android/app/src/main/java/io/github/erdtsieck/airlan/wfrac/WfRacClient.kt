@@ -165,6 +165,12 @@ class WfRacClient(
         return Codec.decode(contents.getString("airconStat"))
     }
 
+    override suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): List<Segment> {
+        val contents = request("setAirconStat", mapOf("airconId" to airconId, "airconStat" to Codec.encodeSegments(power, coolHotJudge, segments)))
+        ownLockUntil[airconId] = nowS() + WRITE_LOCK_S
+        return Codec.segments(contents.getString("airconStat"))
+    }
+
     /** A full account table is told apart from other refusals by the unit's account count. */
     override suspend fun registerAccount(airconId: String, timezone: String) {
         try {

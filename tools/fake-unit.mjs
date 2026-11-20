@@ -6,6 +6,7 @@
 //                            [--accounts-taken 0..4] [--other-writer-every <seconds>] [--mdns]
 //                            [--model 0|1|2|3|64] [--legacy]
 //                            [--answer-delay <ms>] [--stall-every <s> --stall-for <s>]
+//                            [--no-silent]
 //
 // Answers getDeviceInfo, getAirconStat, setAirconStat, updateAccountInfo and
 // deleteAccountInfo over plain HTTP like the HTTP firmware does, keeps the state across
@@ -27,6 +28,10 @@
 //    (busy or stuck), as the real module does around its hourly Wi-Fi reassociation. Anything
 //    that is not HTTP, such as a TLS handshake, is logged: a plain-HTTP module should never
 //    see one once its scheme is known.
+//  - knows silent operation, the one piece of operation data AirLAN uses: a frame carrying
+//    segments instead of a state write (code 0x21 sets it, code 0xDD reads it back) leaves
+//    the state alone; like the real module it answers the write with result 11 although it
+//    applies it. --no-silent refuses both codes, as a unit without silent operation does.
 // Point AirLAN at it by IP address (from the Android emulator: 10.0.2.2).
 //
 // The tests use startFakeUnit() directly.
@@ -59,6 +64,7 @@ export function startFakeUnit({
   legacy = false,
   model,
   answerDelayMs = 0,
+  silentSupported = true,
   state: initial = {},
   log = () => {},
 } = {}) {
@@ -70,6 +76,7 @@ export function startFakeUnit({
     lock: { writer: null, expires: 0 },
     clock: Math.round(Date.now() / 1000),
     requests: [],
+    silent: false,
     /** Connections accepted, and those that were not HTTP (a TLS handshake, say). */
     connections: 0,
     notHttp: 0,
@@ -85,15 +92,24 @@ export function startFakeUnit({
     },
   };
 
-  /** encode(), plus the indoor/outdoor temperature segments a real unit reports. */
-  function frame(s) {
+  /** The COMMAND block's segments, or null for the "nothing to send" sentinel of a state write. */
+  function commandSegments(airconStat) {
+    const d = [...Buffer.from(airconStat, 'base64')];
+    const segments = [];
+    for (let i = 0; i < d[18]; i++) segments.push(d.slice(19 + i * 4, 23 + i * 4));
+    return segments.length === 1 && segments[0].every((b) => b === 0xff) ? null : segments;
+  }
+
+  /** encode(), plus the indoor/outdoor temperature segments a real unit reports, and [answers]. */
+  function frame(s, answers = []) {
     const bytes = [...Buffer.from(encode(s), 'base64')];
     const command = bytes.slice(0, 25); // 18-byte block + 1 segment (5 bytes) + CRC
     const state = bytes.slice(25, 25 + 18);
     if (legacy) state[12] = 1;
     const receive = [
       ...state,
-      2, 0x80, 0x20, nearest(indoorTemp, indoor), 0, 0x80, 0x10, nearest(outdoorTemp, outdoor), 0,
+      2 + answers.length, 0x80, 0x20, nearest(indoorTemp, indoor), 0, 0x80, 0x10, nearest(outdoorTemp, outdoor), 0,
+      ...answers.flat(),
     ];
     const crc = crc16(receive);
     return Buffer.from([...command, ...receive, crc & 0xff, crc >> 8]).toString('base64');
@@ -119,9 +135,9 @@ export function startFakeUnit({
       unit.requests.push(payload);
       // The module has no clock of its own: every request sets it.
       if (timestamp) unit.clock = timestamp;
-      const stat = () => ({
+      const stat = (answers) => ({
         airconId,
-        airconStat: frame(unit.state),
+        airconStat: frame(unit.state, answers),
         updatedBy: 'local',
         expires: unit.lock.expires,
         firmType: 'WF-RAC',
@@ -159,6 +175,21 @@ export function startFakeUnit({
           if (unit.lock.writer && unit.lock.expires >= unit.clock && unit.lock.writer !== deviceId) {
             log(`refused write from ${deviceId}: locked by ${unit.lock.writer} for ${unit.lock.expires - unit.clock} s`);
             return reply(1, stat());
+          }
+          const segments = commandSegments(contents.airconStat);
+          if (segments) {
+            if (!silentSupported || segments.some(([code]) => code !== 0x21 && code !== 0xdd)) {
+              log(`refused operation data ${segments.map(([code]) => code.toString(16)).join(', ')}: unknown code`);
+              return reply(11, stat());
+            }
+            unit.lock = { writer: deviceId, expires: unit.clock + WRITE_LOCK_S };
+            const write = segments.find(([code]) => code === 0x21);
+            if (write) {
+              unit.silent = write[1] === 1;
+              log(`silent operation ${unit.silent ? 'on' : 'off'}`);
+              return reply(11, stat()); // Applied all the same, as the real module does.
+            }
+            return reply(0, stat([[0xdd, 0x80, unit.silent ? 0x20 : 0, 0]]));
           }
           const before = describe(unit.state);
           unit.state = { ...decode(contents.airconStat), indoorTemp: unit.state.indoorTemp, outdoorTemp: unit.state.outdoorTemp };
@@ -231,6 +262,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     legacy: flag('legacy'),
     model: arg('model') === undefined ? undefined : Number(arg('model')),
     answerDelayMs: Number(arg('answer-delay', 0)),
+    silentSupported: !flag('no-silent'),
     state: initial,
     log,
   });

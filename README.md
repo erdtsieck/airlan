@@ -20,6 +20,8 @@ Per unit you can:
 - set the fan speed (auto, quiet, low, medium, high) and the direction, at the bottom of the
   screen: up/down (swing, or highest to lowest) and, on units that have them, left/right
   (swing, five directions, wide or narrow) and 3D auto, which aims both vanes itself
+- in the app, switch on a quiet outdoor unit, the SILENT button on the remote: it runs
+  quieter, at less capacity (on units that have it)
 
 That is all, on purpose. Indoor and outdoor temperature are shown along the way, and with
 more than one unit a compact tile per unit shows at a glance which ones run. Both
@@ -237,6 +239,12 @@ Errors come back as `{ "error": { "code", "message" } }` with `code` one of
   cannot show what they are set to and leaves both out; ceiling cassettes have no left/right
   vane. A unit whose left/right vane is on swing looks the same as such a unit until it is
   set to a direction once, with its remote control or another app.
+- **Quiet outdoor unit.** Silent operation is not part of the state the module reports:
+  AirLAN can only ask for it, and asking takes the write lock like a write. So it shows the
+  state it last set or read, and reads it only when you switch it. Set with the remote, it
+  shows here once you switch it in the app. The module answers the switch with an error even
+  when the unit took it, so AirLAN reads it back to know. A unit that does not know it hides
+  the switch.
 - **One request at a time.** The module accepts one connection at a time and about one
   request per second. AirLAN queues requests per unit, and only that queue talks to a known
   unit: a network search leaves the addresses of known units alone.

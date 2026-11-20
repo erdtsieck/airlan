@@ -53,6 +53,7 @@ object Diagnostics {
         if (!unit.demo) appendLine(networkLine(unit, network))
         appendLine(scheduleLine(unit.schedule, zone))
         appendLine("Model group: ${state?.modelNrRaw ?: unit.modelNrRaw ?: "?"}, left/right vane reported: ${unit.reportsVaneLR}")
+        appendLine("Silent operation: " + if (!unit.hasSilent) "not supported" else when (unit.silent) { true -> "on"; false -> "off"; null -> "not read" })
         if (state != null) {
             appendLine(
                 "State: power ${if (state.power) "on" else "off"}, mode ${state.mode?.name?.lowercase() ?: "unknown"}, " +

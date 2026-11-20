@@ -40,6 +40,39 @@ data class AirconState(
     val vaneLRReported: Boolean = true,
 )
 
+/**
+ * A variable segment of a frame, `[code, op1, op2, op3]`: the operation-data channel the
+ * state block does not carry. In a request all three operands are 0xFF; the unit fills them
+ * in its answer, in the RECEIVE block's trailer.
+ */
+data class Segment(val code: Int, val op1: Int, val op2: Int, val op3: Int) {
+    internal fun bytes() = intArrayOf(code, op1, op2, op3)
+
+    companion object {
+        fun request(code: Int) = Segment(code, 0xff, 0xff, 0xff)
+    }
+}
+
+/**
+ * Silent operation, the remote's SILENT button: the outdoor unit runs quieter, at less
+ * capacity. Not in the state block; it travels as operation data. Written with code 0x21
+ * (op1 1 on, 0 off) and read back with code 0xDD, which answers with selector 0x80 and the
+ * state in bit 0x20 of op2. As mapped by the WF-RAC module reference of the Mitsubishi
+ * WF-RAC Home Assistant integration (§5.4; measured there on WF-RAC-HTTPS 025/200). A unit answers the write with a refusal or an unreadable body even
+ * when it applied it, so only the read says whether it took.
+ */
+object Silent {
+    const val WRITE = 0x21
+    const val READ = 0xDD
+
+    fun write(on: Boolean) = Segment(WRITE, if (on) 1 else 0, 0xff, 0xff)
+
+    val read = Segment.request(READ)
+
+    /** The state in a unit's answers, or null when they carry none. */
+    fun of(answers: List<Segment>): Boolean? = answers.firstOrNull { it.code == READ && it.op1 == 0x80 }?.let { it.op2 and 0x20 != 0 }
+}
+
 object Codec {
     /**
      * Whether a unit's model line has a left/right vane and 3D auto, per the official app's
@@ -70,8 +103,17 @@ object Codec {
         return bytes + intArrayOf(crc and 0xff, crc shr 8)
     }
 
+    private fun bytesOf(base64: String) = Base64.getDecoder().decode(base64).map { it.toInt() and 0xff }
+
+    /** The RECEIVE block's variable segments: the temperatures and energy the module adds, and answers to requests. */
+    fun segments(base64: String): List<Segment> {
+        val d = bytesOf(base64)
+        val start = d[18] * 4 + 21
+        return d.subList(start + 19, d.size - 2).chunked(4).filter { it.size == 4 }.map { Segment(it[0], it[1], it[2], it[3]) }
+    }
+
     fun decode(base64: String): AirconState {
-        val d = Base64.getDecoder().decode(base64).map { it.toInt() and 0xff }
+        val d = bytesOf(base64)
         val start = d[18] * 4 + 21
         val c = d.subList(start, start + 18)
         val segments = d.subList(start + 19, d.size - 2)
@@ -153,7 +195,28 @@ object Codec {
     fun encode(s: AirconState): String {
         val mode = requireNotNull(s.mode) { "unknown mode" }
         require(s.airFlow in CMD_AIRFLOW.indices) { "unknown fan speed ${s.airFlow}" }
-        val bytes = withCrc(commandBlock(s, mode) + NO_SEGMENTS) + withCrc(receiveBlock(s, mode) + NO_SEGMENTS)
+        return frame(commandBlock(s, mode) + NO_SEGMENTS, receiveBlock(s, mode) + NO_SEGMENTS)
+    }
+
+    /**
+     * A frame that changes nothing in the state and carries [segments] (at most ten): a
+     * COMMAND block without set-bits, which a unit ignores. One thing is filled in all the
+     * same: the power value of [power], the unit's current state, without its set-bit. A
+     * unit that takes the power value without its set-bit has been reported (WF-RAC module
+     * reference, §5.3); from an all-zero block it would switch off, from this one it stays as
+     * it is. Byte 8 is carried as in any command; byte 5 is the "use your own sensor" sentinel.
+     */
+    fun encodeSegments(power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): String {
+        require(segments.size in 1..10) { "between 1 and 10 segments, not ${segments.size}" }
+        val command = emptyBlock()
+        if (power) command[2] = 1
+        if (!coolHotJudge) command[8] = 8
+        val trailer = intArrayOf(segments.size) + segments.flatMap { it.bytes().toList() }
+        return frame(command + trailer, emptyBlock() + NO_SEGMENTS)
+    }
+
+    private fun frame(command: IntArray, receive: IntArray): String {
+        val bytes = withCrc(command) + withCrc(receive)
         return Base64.getEncoder().encodeToString(ByteArray(bytes.size) { bytes[it].toByte() })
     }
 }

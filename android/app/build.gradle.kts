@@ -14,14 +14,17 @@ val signingProps = (System.getenv("AIRLAN_SIGNING") ?: "${System.getProperty("us
 
 android {
     namespace = "io.github.erdtsieck.airlan"
-    compileSdk = 37
+    // 37.2: Compose 1.13 compiles against it. targetSdk stays 37.
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
 
     defaultConfig {
         applicationId = "io.github.erdtsieck.airlan"
         minSdk = 26
         targetSdk = 37
-        versionCode = 11
-        versionName = "0.5.0"
+        versionCode = 12
+        versionName = "1.0.0"
     }
 
     signingConfigs {

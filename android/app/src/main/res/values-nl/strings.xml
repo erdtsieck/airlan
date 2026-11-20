@@ -54,6 +54,10 @@
         <item>Breed</item>
         <item>Smal</item>
     </string-array>
+    <string name="silent">Stille buitenunit</string>
+    <string name="silent_hint">Zoals SILENT op de afstandsbediening</string>
+    <string name="error_silent_not_supported">Deze airco heeft geen stille stand.</string>
+    <string name="error_silent_not_applied">De airco nam de stille stand niet over. Probeer het over een minuut opnieuw.</string>
     <string name="auto_3d">3D auto</string>
     <string name="off_at">Gaat uit om %1$s</string>
     <string name="cancel">Annuleren</string>

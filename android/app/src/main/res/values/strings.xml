@@ -61,6 +61,11 @@
         <item>Narrow</item>
     </string-array>
     <!-- The unit aims both vanes itself. -->
+    <!-- Silent operation, the SILENT button on the remote: the outdoor unit runs quieter, at less capacity. -->
+    <string name="silent">Quiet outdoor unit</string>
+    <string name="silent_hint">Like SILENT on the remote</string>
+    <string name="error_silent_not_supported">This unit does not have a silent mode.</string>
+    <string name="error_silent_not_applied">The unit did not take the silent mode. Try again in a minute.</string>
     <string name="auto_3d">3D auto</string>
     <string name="off_at">Switches off at %1$s</string>
     <string name="cancel">Cancel</string>

@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <color name="brand">#1D7FE0</color>
-    <!-- Compose draws everything; the window theme only sets the colours seen before it does. -->
+    <!--
+    Compose draws everything; the window theme only sets the colours seen before it does, and
+    the system bars. The app is drawn edge to edge (see MainActivity): the status bar is
+    transparent, the navigation bar too where the system keeps its buttons legible itself
+    (Android 10 and later), a scrim before that. The bars' icons follow light and dark mode.
+    -->
     <style name="Theme.AirLAN" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/navigation_bar</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
 </resources>

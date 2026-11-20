@@ -28,6 +28,7 @@ class DemoClient(private val now: () -> Long = System::currentTimeMillis) : Airc
             coolHotJudge = true, modelNr = 0, modelNrRaw = 0, vacant = false, selfClean = false,
         ),
     )
+    private var silent = false
     private var indoor = ROOM_TEMP
     private var indoorAt = now()
 
@@ -38,6 +39,16 @@ class DemoClient(private val now: () -> Long = System::currentTimeMillis) : Airc
         advanceIndoor() // up to now under the old state
         this.state = roundTrip(state)
         reported()
+    }
+
+    /** Knows silent operation, the one piece of operation data the app uses; refuses any other code, as a unit does. */
+    override suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): List<Segment> = mutex.withLock {
+        if (!registered) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 2)", 2)
+        if (segments.any { it.code != Silent.WRITE && it.code != Silent.READ }) {
+            throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 11)", 11)
+        }
+        segments.filter { it.code == Silent.WRITE }.forEach { silent = it.op1 == 1 }
+        segments.filter { it.code == Silent.READ }.map { Segment(Silent.READ, 0x80, if (silent) 0x20 else 0, 0) }
     }
 
     override suspend fun registerAccount(airconId: String, timezone: String) = mutex.withLock { registered = true }
