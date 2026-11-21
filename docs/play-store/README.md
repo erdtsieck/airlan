@@ -68,7 +68,10 @@ cd android
 2. Let Google manage the app signing key (Play App Signing) when asked; the key in this
    project is the *upload* key.
 3. After 14 days: Dashboard → *Apply for production* and answer the questions about the
-   test, then create a production release with the same bundle (or a newer one).
+   test, then create a production release with the same bundle (or a newer one). AirLAN got
+   production access in November 2026; 1.0.0 was its first production release. The closed
+   test stays as an early-access track: every release goes to internal testing, the closed
+   test and production.
 
 For every new version, raise `versionCode` (and `versionName`) in `android/app/build.gradle.kts`,
 add `fastlane/metadata/android/{en-US,nl-NL}/changelogs/<versionCode>.txt`, and tag the release
