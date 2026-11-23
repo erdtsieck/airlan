@@ -1,0 +1,1 @@
+A unit whose four app slots are all taken, by old phones for example, can now be controlled all the same: AirLAN no longer needs a slot of its own there.

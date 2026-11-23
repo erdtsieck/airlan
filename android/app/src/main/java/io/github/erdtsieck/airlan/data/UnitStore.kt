@@ -4,6 +4,7 @@ import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.Codec
 import io.github.erdtsieck.airlan.wfrac.Mode
 import io.github.erdtsieck.airlan.wfrac.Scheme
+import io.github.erdtsieck.airlan.wfrac.Writer
 import java.io.File
 import java.time.DayOfWeek
 import java.time.Instant
@@ -46,6 +47,12 @@ data class StoredUnit(
     val silent: Boolean? = null,
     /** False once the unit has refused silent operation: it does not have it. */
     val hasSilent: Boolean = true,
+    /**
+     * Who writes go out as: [Writer.CLOUD] while the unit's four account slots are taken by other
+     * apps, so AirLAN cannot register. Registering is tried again each time the app starts, and
+     * a slot that has come free puts the unit back on [Writer.AIRLAN]; see [Repository.register].
+     */
+    val writer: Writer = Writer.AIRLAN,
 )
 
 /**
@@ -121,6 +128,7 @@ class UnitStore(private val file: File, private val zone: () -> ZoneId = ZoneId:
                     reportsVaneLR = u.optBoolean("reportsVaneLR", false),
                     silent = if (u.has("silent")) u.getBoolean("silent") else null,
                     hasSilent = u.optBoolean("hasSilent", true),
+                    writer = if (u.optString("writer") == "cloud") Writer.CLOUD else Writer.AIRLAN,
                 )
             },
         )
@@ -249,6 +257,7 @@ class UnitStore(private val file: File, private val zone: () -> ZoneId = ZoneId:
                                 if (u.reportsVaneLR) put("reportsVaneLR", true)
                                 u.silent?.let { put("silent", it) }
                                 if (!u.hasSilent) put("hasSilent", false)
+                                if (u.writer == Writer.CLOUD) put("writer", "cloud")
                             }
                     },
                 ),

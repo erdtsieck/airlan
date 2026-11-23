@@ -14,6 +14,7 @@ import io.github.erdtsieck.airlan.wfrac.UnitUnreachableException
 import io.github.erdtsieck.airlan.wfrac.WFRAC_PORT
 import io.github.erdtsieck.airlan.wfrac.WfRacClient
 import io.github.erdtsieck.airlan.wfrac.WfRacException
+import io.github.erdtsieck.airlan.wfrac.Writer
 import java.io.IOException
 import java.net.InetAddress
 import java.time.LocalDate
@@ -178,29 +179,44 @@ class Repository(
     private suspend fun register(airconId: String) = migrateMutex.withLock {
         val legacy = store.state.value.legacyOperatorId
         val unit = require(airconId)
-        if (legacy != null && !unit.accountMigrated && !unit.demo) {
-            withUnit(airconId) { it.migrateAccount(airconId, legacy, timezone()) }
-            store.updateUnit(airconId) { it.copy(accountMigrated = true) }
-        } else {
-            withUnit(airconId) { it.registerAccount(airconId, timezone()) }
+        val writer = try {
+            if (legacy != null && !unit.accountMigrated && !unit.demo) {
+                withUnit(airconId) { it.migrateAccount(airconId, legacy, timezone()) }
+                store.updateUnit(airconId) { it.copy(accountMigrated = true) }
+            } else {
+                withUnit(airconId) { it.registerAccount(airconId, timezone()) }
+            }
+            Writer.AIRLAN
+        } catch (e: WfRacException) {
+            if (e.code != WfRacException.NO_ACCOUNT_SLOT) throw e
+            Writer.CLOUD
+        }
+        if (unit.writer != writer) {
+            traceOf(airconId).note(
+                if (writer == Writer.CLOUD) "all account slots taken: writing as the cloud operator" else "registered: writing as AirLAN again",
+                now(),
+            )
+            store.updateUnit(airconId) { it.copy(writer = writer) }
         }
         registered += airconId
     }
 
     /**
-     * Registers with a unit the user claims (adds or names), so a unit without a free account
-     * slot shows up then and not at the first switch. Throws only for a full unit
-     * ([WfRacException.NO_ACCOUNT_SLOT]); anything else is left for the first write.
+     * Registers with a unit the user claims (adds or names), so that a unit whose account slots
+     * are all taken is known from the start to need [Writer.CLOUD]. Anything that goes wrong is
+     * left for the first write.
      */
     suspend fun claim(airconId: String) {
         try {
             register(airconId)
-        } catch (e: WfRacException) {
-            if (e.code == WfRacException.NO_ACCOUNT_SLOT) throw e
         } catch (e: Exception) {
             // Unreachable, or no permission: the first write registers.
         }
     }
+
+    /** The unit's four slots are taken, and it does not take writes as [Writer.CLOUD] either. */
+    private fun noAccountSlot(airconId: String, result: Int?) =
+        WfRacException(WfRacException.NO_ACCOUNT_SLOT, "unit $airconId has no free account slot and refuses the cloud operator", result)
 
     /**
      * The user changes the unit: [write], after which a switch-off timer ends with the run it
@@ -224,8 +240,9 @@ class Repository(
      *  - another client holds the write lock: waits for it to lapse when that takes at most
      *    [waitUpToS] (telling [onWait] how long) and tries once more, or throws
      *    [WfRacException.UNIT_BUSY];
-     *  - otherwise our account may be gone (deleted from elsewhere): registers again, which
-     *    throws [WfRacException.NO_ACCOUNT_SLOT] when the unit is full, and tries once more.
+     *  - otherwise our account may be gone (deleted from elsewhere): registers again (which
+     *    falls back to [Writer.CLOUD] on a full unit) and tries once more. A unit that refuses
+     *    that too while full throws [WfRacException.NO_ACCOUNT_SLOT].
      */
     private suspend fun write(
         airconId: String,
@@ -237,7 +254,7 @@ class Repository(
         val attempt: suspend () -> AirconState = {
             withUnit(airconId) { client ->
                 val next = change(client.getStat(airconId))
-                val echoed = client.setStat(airconId, next)
+                val echoed = client.setStat(airconId, next, require(airconId).writer)
                 next.copy(indoorTemp = echoed.indoorTemp ?: next.indoorTemp, outdoorTemp = echoed.outdoorTemp ?: next.outdoorTemp)
             }
         }
@@ -259,7 +276,11 @@ class Repository(
             } catch (again: WfRacException) {
                 if (again.code != WfRacException.UNIT_REFUSED) throw again
                 val left = runCatching { withUnit(airconId) { it.getStatus(airconId) }.lockedForS }.getOrDefault(0)
-                throw if (left > 0) busy(airconId, left, again.result) else again
+                throw when {
+                    left > 0 -> busy(airconId, left, again.result)
+                    require(airconId).writer == Writer.CLOUD -> noAccountSlot(airconId, again.result)
+                    else -> again
+                }
             }
         }
         noteAirflowSupport(airconId, written)
@@ -291,18 +312,19 @@ class Repository(
         val power = status.state.power
         val coolHotJudge = status.state.coolHotJudge
         suspend fun read(): Boolean = withUnit(airconId) { client ->
+            val writer = require(airconId).writer
             // An unreadable answer is the module's, not the unit's: asked once more before believing it.
             val answers = try {
-                client.exchange(airconId, power, coolHotJudge, listOf(Silent.read))
+                client.exchange(airconId, power, coolHotJudge, listOf(Silent.read), writer)
             } catch (e: WfRacException) {
                 if (e.code != WfRacException.BAD_RESPONSE) throw e
-                client.exchange(airconId, power, coolHotJudge, listOf(Silent.read))
+                client.exchange(airconId, power, coolHotJudge, listOf(Silent.read), writer)
             }
             Silent.of(answers) ?: throw WfRacException(WfRacException.BAD_RESPONSE, "no silent operation in the answer")
         }
         withUnit(airconId) { client ->
             try {
-                client.exchange(airconId, power, coolHotJudge, listOf(Silent.write(on)))
+                client.exchange(airconId, power, coolHotJudge, listOf(Silent.write(on)), require(airconId).writer)
             } catch (e: WfRacException) {
                 if (e.code != WfRacException.UNIT_REFUSED && e.code != WfRacException.BAD_RESPONSE) throw e
             }
@@ -319,6 +341,7 @@ class Repository(
                 read()
             } catch (again: WfRacException) {
                 if (again.code != WfRacException.UNIT_REFUSED) throw again
+                if (require(airconId).writer == Writer.CLOUD) throw noAccountSlot(airconId, again.result)
                 store.updateUnit(airconId) { it.copy(hasSilent = false, silent = null) }
                 throw WfRacException(WfRacException.NOT_SUPPORTED, "unit $airconId does not know silent operation", again.result)
             }
