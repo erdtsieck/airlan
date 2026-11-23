@@ -4,6 +4,7 @@ import io.github.erdtsieck.airlan.discovery.Announced
 import io.github.erdtsieck.airlan.wfrac.AIRLAN_OPERATOR_ID
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.WfRacException
+import io.github.erdtsieck.airlan.wfrac.Writer
 import io.github.erdtsieck.airlan.wfrac.Codec
 import io.github.erdtsieck.airlan.wfrac.Mode
 import io.github.erdtsieck.airlan.wfrac.Scheme
@@ -55,6 +56,11 @@ class RepositoryTest {
         }
 
         /** Silent operation; a unit that lacks it ([silentSupported] false) refuses its codes with result 11. */
+        /** Whether it takes writes from the cloud operator ("aws") without an account, as the modules measured do. */
+        @Volatile var acceptsCloud = true
+        /** The operator id of the last accepted write. */
+        @Volatile var lastWriter: String? = null
+
         @Volatile var silent = false
         @Volatile var silentSupported = true
 
@@ -131,7 +137,7 @@ class RepositoryTest {
                             }
                             "deleteAccountInfo" -> if (accounts.remove(request!!.getString("accountId"))) 0 else 1
                             "setAirconStat" -> when {
-                                operator !in accounts -> 2
+                                operator !in accounts && !(acceptsCloud && operator == "aws") -> 2
                                 lockWriter != null && lockExpires >= clock && lockWriter != device -> 1
                                 commandSegments(request!!.getString("airconStat")) != null -> {
                                     val segments = commandSegments(request.getString("airconStat"))!!
@@ -151,6 +157,7 @@ class RepositoryTest {
                                     }
                                 }
                                 else -> {
+                                    lastWriter = operator
                                     state = Codec.decode(request!!.getString("airconStat"))
                                     lockWriter = device
                                     lockExpires = clock + 60
@@ -826,11 +833,42 @@ class RepositoryTest {
     private fun code(e: Throwable?) = (e as? WfRacException)?.code
 
     @Test
-    fun `a unit without a free account slot says so when claimed and when written`() = runBlocking {
+    fun `a unit with all account slots taken is written as the cloud operator, without taking a slot`() = runBlocking {
         val repo = repository()
         repo.add("127.0.0.1")
+        unit.accounts.clear()
         unit.accounts += listOf("a", "b", "c", "d")
-        assertEquals(WfRacException.NO_ACCOUNT_SLOT, code(runCatching { repo.claim(ID) }.exceptionOrNull()))
+        repo.claim(ID)
+        assertEquals(Writer.CLOUD, repository().stored().writer)
+
+        assertTrue(repo.apply(ID) { it.copy(power = true) }.power)
+        assertTrue(unit.state.power)
+        assertEquals("aws", unit.lastWriter)
+        assertEquals(4, unit.accounts.size)
+        assertTrue(repo.diagnostics(ID, "1.0.1", "16", null).contains("Writes as: the cloud operator"))
+    }
+
+    @Test
+    fun `a slot that has come free puts the unit back on AirLAN's account at the next start`() = runBlocking {
+        unit.accounts += listOf("a", "b", "c", "d")
+        repository().run { add("127.0.0.1"); claim(ID) }
+        assertEquals(Writer.CLOUD, repository().stored().writer)
+
+        unit.accounts -= "d"
+        val restarted = repository()
+        restarted.apply(ID) { it.copy(power = true) }
+        assertEquals(Writer.AIRLAN, restarted.stored().writer)
+        assertEquals(AIRLAN_OPERATOR_ID, unit.lastWriter)
+        assertTrue(AIRLAN_OPERATOR_ID in unit.accounts)
+    }
+
+    @Test
+    fun `a full unit that refuses the cloud operator too says it has no free slot`() = runBlocking {
+        unit.acceptsCloud = false
+        val repo = repository()
+        repo.add("127.0.0.1")
+        unit.accounts.clear()
+        unit.accounts += listOf("a", "b", "c", "d")
         assertEquals(WfRacException.NO_ACCOUNT_SLOT, code(runCatching { repo.apply(ID) { it.copy(power = true) } }.exceptionOrNull()))
         assertFalse(unit.state.power)
     }

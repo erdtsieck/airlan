@@ -214,8 +214,12 @@ Errors come back as `{ "error": { "code", "message" } }` with `code` one of
   (see *Home network only*). Writers are still told apart by a per-installation `deviceId`.
   AirLAN 0.1.1 and older registered an account per installation; newer versions free that
   one and move to the shared account the first time they reach the unit. When a unit is
-  full of other apps' accounts, AirLAN says so (`no_account_slot`) when you add or name it.
-  Remove the unit from an app you no longer use to make room.
+  full of other apps' accounts, the Android app writes as `aws` instead: the operator id the
+  module keeps for its own cloud connection, which it lets write without an account. That
+  takes no slot. It was measured on `WF-RAC` 010/131 and `WF-RAC-HTTPS` 025/200; it is not
+  documented, so a firmware update may close it, and then AirLAN says the unit is full
+  (`no_account_slot`). Each start the app tries to register again, and goes back to its own
+  account once a slot is free. Remove the unit from an app you no longer use to make room.
 - **Write lock.** After a write, the writer holds an exclusive 60-second write lock. If
   someone just used Smart M-Air or a voice assistant, AirLAN may be refused briefly
   briefly. AirLAN reads when the lock lapses (`expires` in the unit's status): a lock that

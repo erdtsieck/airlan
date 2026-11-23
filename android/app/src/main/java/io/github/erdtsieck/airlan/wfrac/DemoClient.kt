@@ -34,16 +34,16 @@ class DemoClient(private val now: () -> Long = System::currentTimeMillis) : Airc
 
     override suspend fun getStatus(airconId: String): UnitStatus = mutex.withLock { UnitStatus(reported(), accounts = if (registered) 1 else 0) }
 
-    override suspend fun setStat(airconId: String, state: AirconState): AirconState = mutex.withLock {
-        if (!registered) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 2)", 2)
+    override suspend fun setStat(airconId: String, state: AirconState, writer: Writer): AirconState = mutex.withLock {
+        if (!registered && writer != Writer.CLOUD) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 2)", 2)
         advanceIndoor() // up to now under the old state
         this.state = roundTrip(state)
         reported()
     }
 
     /** Knows silent operation, the one piece of operation data the app uses; refuses any other code, as a unit does. */
-    override suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): List<Segment> = mutex.withLock {
-        if (!registered) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 2)", 2)
+    override suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>, writer: Writer): List<Segment> = mutex.withLock {
+        if (!registered && writer != Writer.CLOUD) throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 2)", 2)
         if (segments.any { it.code != Silent.WRITE && it.code != Silent.READ }) {
             throw WfRacException(WfRacException.UNIT_REFUSED, "unit refused setAirconStat (result 11)", 11)
         }

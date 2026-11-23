@@ -15,6 +15,18 @@ const val WRITE_LOCK_S = 60
 const val AIRLAN_OPERATOR_ID = "98c7ec9c-1dac-4e5f-8d16-a145f58a38db"
 
 /**
+ * Who a write is sent as. [AIRLAN] is AirLAN's registered account ([AIRLAN_OPERATOR_ID] on a
+ * real unit). [CLOUD] is the operator id the module keeps for its own cloud connection,
+ * "aws": the module lets it write without a registered account, so it takes no account slot.
+ * It is the fallback for a unit whose four slots are all taken by other apps; measured to work
+ * on WF-RAC 010/131 and WF-RAC-HTTPS 025/200. Undocumented, so a firmware update may close it.
+ */
+enum class Writer { AIRLAN, CLOUD }
+
+/** The operator id the module accepts writes from without a registered account. */
+const val CLOUD_OPERATOR_ID = "aws"
+
+/**
  * What a read tells about a unit besides its state: how long another client's write lock
  * still runs ([lockedForS], 0 when nobody else holds it) and how many of its account slots
  * are taken ([accounts], null when the unit does not say).
@@ -37,8 +49,8 @@ interface AirconClient {
 
     suspend fun getStat(airconId: String): AirconState = getStatus(airconId).state
 
-    /** Writes a full state frame and returns the state the unit reports back. */
-    suspend fun setStat(airconId: String, state: AirconState): AirconState
+    /** Writes a full state frame, as [writer], and returns the state the unit reports back. */
+    suspend fun setStat(airconId: String, state: AirconState, writer: Writer = Writer.AIRLAN): AirconState
 
     /**
      * Sends [segments] in a frame that changes nothing in the state (see [Codec.encodeSegments])
@@ -46,7 +58,7 @@ interface AirconClient {
      * Like any setAirconStat it takes the write lock. Throws [WfRacException] when the unit
      * refuses, which it also does when it does not know one of the codes.
      */
-    suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): List<Segment>
+    suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>, writer: Writer = Writer.AIRLAN): List<Segment>
 
     /**
      * Writes require a registered account ([ACCOUNT_SLOTS] per unit). Re-registering the same

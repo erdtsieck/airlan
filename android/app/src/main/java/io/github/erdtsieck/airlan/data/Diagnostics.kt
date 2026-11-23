@@ -5,6 +5,7 @@ import io.github.erdtsieck.airlan.discovery.contains
 import io.github.erdtsieck.airlan.discovery.network
 import io.github.erdtsieck.airlan.wfrac.AirconState
 import io.github.erdtsieck.airlan.wfrac.RequestTrace
+import io.github.erdtsieck.airlan.wfrac.Writer
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -49,6 +50,7 @@ object Diagnostics {
             appendLine("Unit: ...${unit.airconId.takeLast(4)} at ${maskAddresses(unit.host)}, transport ${unit.scheme?.name?.lowercase() ?: "unknown"}")
             val m = trace?.module
             appendLine("Module: firmType ${m?.firmType ?: "?"}, wireless ${m?.wireless ?: "?"}, mcu ${m?.mcu ?: "?"}, accounts ${m?.accounts ?: "?"}")
+            appendLine("Writes as: " + if (unit.writer == Writer.CLOUD) "the cloud operator (all account slots taken)" else "AirLAN's account")
         }
         if (!unit.demo) appendLine(networkLine(unit, network))
         appendLine(scheduleLine(unit.schedule, zone))

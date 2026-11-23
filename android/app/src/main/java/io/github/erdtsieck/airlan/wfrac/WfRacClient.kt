@@ -159,14 +159,20 @@ class WfRacClient(
         return (expires - nowS()).coerceAtLeast(0).toInt()
     }
 
-    override suspend fun setStat(airconId: String, state: AirconState): AirconState {
-        val contents = request("setAirconStat", mapOf("airconId" to airconId, "airconStat" to Codec.encode(state)))
+    private fun operatorFor(writer: Writer) = when (writer) {
+        Writer.AIRLAN -> operatorId
+        Writer.CLOUD -> CLOUD_OPERATOR_ID
+    }
+
+    override suspend fun setStat(airconId: String, state: AirconState, writer: Writer): AirconState {
+        val contents = request("setAirconStat", mapOf("airconId" to airconId, "airconStat" to Codec.encode(state)), operatorFor(writer))
         ownLockUntil[airconId] = nowS() + WRITE_LOCK_S
         return Codec.decode(contents.getString("airconStat"))
     }
 
-    override suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>): List<Segment> {
-        val contents = request("setAirconStat", mapOf("airconId" to airconId, "airconStat" to Codec.encodeSegments(power, coolHotJudge, segments)))
+    override suspend fun exchange(airconId: String, power: Boolean, coolHotJudge: Boolean, segments: List<Segment>, writer: Writer): List<Segment> {
+        val frame = Codec.encodeSegments(power, coolHotJudge, segments)
+        val contents = request("setAirconStat", mapOf("airconId" to airconId, "airconStat" to frame), operatorFor(writer))
         ownLockUntil[airconId] = nowS() + WRITE_LOCK_S
         return Codec.segments(contents.getString("airconStat"))
     }
