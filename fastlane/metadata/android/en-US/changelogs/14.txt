@@ -1,0 +1,1 @@
+The left/right vane is now drawn as you see it facing the unit, the unit at the top, like Smart M-Air does: a position to the right is drawn to the right. Thanks to Henk994 on Tweakers.

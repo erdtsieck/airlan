@@ -64,7 +64,9 @@ import kotlin.math.sin
  * A fan of vane positions as rays from a pivot, in a box of [width]×[height] dp. The rays'
  * ends lie on an ellipse with semi-axes [a] and [b] around the pivot. [sideView]: the up/down
  * vane seen from the side, angles below the horizontal; otherwise the left/right vane from
- * above, angles from straight ahead (negative is left). The same numbers as the web app.
+ * above as you see it standing in the room facing the unit: the unit at the top, the air
+ * coming down towards you, angles from straight ahead (negative is to your left, as the
+ * positions are named and as Smart M-Air draws them). The same numbers as the web app.
  */
 private class Fan(
     val width: Float,
@@ -78,18 +80,18 @@ private class Fan(
 ) {
     fun end(i: Int): Offset {
         val r = angles[i] * PI.toFloat() / 180f
-        return if (sideView) Offset(px + a * cos(r), py + b * sin(r)) else Offset(px + a * sin(r), py - b * cos(r))
+        return if (sideView) Offset(px + a * cos(r), py + b * sin(r)) else Offset(px + a * sin(r), py + b * cos(r))
     }
 
     /** The ray nearest to a point, in dp from the box's top left. */
     fun nearest(x: Float, y: Float): Int {
-        val angle = (if (sideView) atan2((y - py) / b, (x - px) / a) else atan2((x - px) / a, (py - y) / b)) * 180f / PI.toFloat()
+        val angle = (if (sideView) atan2((y - py) / b, (x - px) / a) else atan2((x - px) / a, (y - py) / b)) * 180f / PI.toFloat()
         return angles.indices.minBy { abs(angles[it] - angle) }
     }
 }
 
 private val UP_DOWN = Fan(112f, 64f, 16f, 12f, 90f, 50f, listOf(6f, 24f, 42f, 60f), sideView = true)
-private val LEFT_RIGHT = Fan(120f, 60f, 60f, 56f, 54f, 50f, listOf(-66f, -33f, 0f, 33f, 66f), sideView = false)
+private val LEFT_RIGHT = Fan(120f, 60f, 60f, 10f, 54f, 46f, listOf(-66f, -33f, 0f, 33f, 66f), sideView = false)
 
 /** The colours of the card: the accent is the colour of the unit's mode. */
 private class FlowColors(val accent: Color, val soft: Color, val idle: Color, val muted: Color, val line: Color)
@@ -347,13 +349,13 @@ private fun RayFan(
         Canvas(Modifier.size(fan.width.dp, fan.height.dp)) {
             val k = density
             val pivot = Offset(fan.px * k, fan.py * k)
-            if (fan.sideView) {
-                drawRoundRect(
-                    color = f.muted.copy(alpha = 0.35f * dim), topLeft = Offset(0f, 2 * k),
-                    size = Size(28 * k, 11 * k),
-                    cornerRadius = CornerRadius(3 * k),
-                )
-            }
+            // The unit: its side for the up/down vane, its front edge at the top for left/right.
+            drawRoundRect(
+                color = f.muted.copy(alpha = 0.35f * dim),
+                topLeft = if (fan.sideView) Offset(0f, 2 * k) else Offset((fan.px - 24) * k, 0f),
+                size = if (fan.sideView) Size(28 * k, 11 * k) else Size(48 * k, 6 * k),
+                cornerRadius = CornerRadius(3 * k),
+            )
             for (i in fan.angles.indices) {
                 val e = fan.end(i).let { Offset(it.x * k, it.y * k) }
                 val color = when {

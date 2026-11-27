@@ -53,18 +53,20 @@ const modeColor = (mode) => MODES.includes(mode) ? `var(--${mode})` : 'var(--tex
 // The airflow drawings. Each vane position is a ray from a pivot; the rays' ends lie on an
 // ellipse, so the fan fits its box. A tap anywhere in the drawing picks the nearest ray.
 // Up/down, side view: the unit's body top left, rays from just below the horizontal (highest)
-// to steep (lowest). Left/right, top view: rays from the pivot at the bottom, left to right.
+// to steep (lowest). Left/right, top view as you see it facing the unit: its front edge at
+// the top, rays coming down towards you, left to right as the positions are named (and as
+// Smart M-Air draws them).
 const FAN_UD = { w: 112, h: 64, px: 16, py: 12, a: 90, b: 50, angles: [6, 24, 42, 60] };
-const FAN_LR = { w: 120, h: 60, px: 60, py: 56, a: 54, b: 50, angles: [-66, -33, 0, 33, 66] };
+const FAN_LR = { w: 120, h: 60, px: 60, py: 10, a: 54, b: 46, angles: [-66, -33, 0, 33, 66] };
 const rayEnd = (f, deg) => {
   const r = (deg * Math.PI) / 180;
-  return f === FAN_UD ? [f.px + f.a * Math.cos(r), f.py + f.b * Math.sin(r)] : [f.px + f.a * Math.sin(r), f.py - f.b * Math.cos(r)];
+  return f === FAN_UD ? [f.px + f.a * Math.cos(r), f.py + f.b * Math.sin(r)] : [f.px + f.a * Math.sin(r), f.py + f.b * Math.cos(r)];
 };
 /** The index of the ray nearest to a point in the drawing's own coordinates. */
 function nearestRay(f, x, y) {
   const angle = f === FAN_UD
     ? (Math.atan2((y - f.py) / f.b, (x - f.px) / f.a) * 180) / Math.PI
-    : (Math.atan2((x - f.px) / f.a, (f.py - y) / f.b) * 180) / Math.PI;
+    : (Math.atan2((x - f.px) / f.a, (y - f.py) / f.b) * 180) / Math.PI;
   return f.angles.reduce((best, a, i) => (Math.abs(a - angle) < Math.abs(f.angles[best] - angle) ? i : best), 0);
 }
 /**
@@ -79,7 +81,9 @@ function fanSvg(id, f, { lit = [], dot = null, faint = false, labels, pressed, d
     const end = dot === i ? `<circle class="end" cx="${x}" cy="${y}" r="4"/>` : '';
     return `<g role="button" tabindex="${disabled ? -1 : 0}" data-ray="${i}" aria-label="${escape(labels[i])}" aria-pressed="${pressed(i)}"><line class="${cls}" x1="${f.px}" y1="${f.py}" x2="${x}" y2="${y}"/>${end}</g>`;
   }).join('');
-  const body = f === FAN_UD ? '<rect class="body" x="0" y="2" width="28" height="11" rx="3"/>' : '';
+  const body = f === FAN_UD
+    ? '<rect class="body" x="0" y="2" width="28" height="11" rx="3"/>'
+    : `<rect class="body" x="${f.px - 24}" y="0" width="48" height="6" rx="3"/>`;
   return `<svg class="fan${disabled ? ' disabled' : ''}" id="${id}" width="${f.w}" height="${f.h}" viewBox="0 0 ${f.w} ${f.h}" role="group">${body}${rays}</svg>`;
 }
 const TEMP_MIN = 16, TEMP_MAX = 30;
